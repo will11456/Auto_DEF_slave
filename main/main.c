@@ -78,6 +78,7 @@ void app_main(void)
     xTaskCreatePinnedToCore(uart_task, "uart_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
     xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
     
+    
 
 ///////////////////////////////MODEM//////////////////////////////////
 
@@ -85,8 +86,9 @@ void app_main(void)
     vTaskDelay(15000 / portTICK_PERIOD_MS);
 
     // //Start MQTT and MQTT Publishing Task
-    xTaskCreate(mqtt_task, "mqtt_task", 2048*8, NULL, 5, &mqttTaskHandle);
-    xTaskCreate(publish_task, "publsh_task", 2048*8, NULL, 5, &publishTaskHandle);
+    // xTaskCreate(mqtt_task, "mqtt_task", 2048*8, NULL, 5, &mqttTaskHandle);
+    // xTaskCreate(publish_task, "publsh_task", 2048*8, NULL, 5, &publishTaskHandle);
+
 
     
 
