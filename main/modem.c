@@ -1,23 +1,41 @@
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
-#include "display.h"
 #include "uart.h"
-#include "data.h"
+#include "esp_log.h"
+#include "freertos/task.h"
+#include <string.h>
 
-// UART port number for SIM800L
-#define SIM800L_UART_PORT UART_NUM_2
+#define SIM7080_UART_PORT UART_NUM_2
+#define SIM7080_UART_BUF_SIZE 1024
+#define SIM7080_BAUD_RATE 115200
 
-// UART buffer size
-#define SIM800L_UART_BUF_SIZE 1024
-
-static const char* TAG = "MODEM";
+static const char *TAG = "SIM7080";
 
 
-void sim800l_init(void) {
-    // Configure UART parameters
+// ==========================
+// SIM7080G CONFIGURATION
+// ==========================
+
+#define APN              "eapn1.net"
+#define APN_USER         "DynamicF"                     
+#define APN_PASS         "DynamicF"                     
+
+// MQTT CONFIG
+#define MQTT_BROKER      "mqtt://mqtt.akenza.io"
+#define MQTT_PORT        1883
+#define MQTT_CLIENT_ID   "esp32sim7080"
+#define MQTT_USERNAME    "07ac444748e9232b"                     
+#define MQTT_PASSWORD    "7ho0anm3u0q0pa1pgwsxu53nw1xqboi9"                     
+
+#define MQTT_TOPIC_PUB   "/up/7ho0anm3u0q0pa1pgwsxu53nw1xqboi9/id/E19917E90E406B5E"
+#define MQTT_MESSAGE     "hello from SIM7080G"
+#define MQTT_TOPIC_SUB   "test/topic"
+
+
+void sim7080_init(void) {
     const uart_config_t uart_config = {
-        .baud_rate = SIM800L_BAUD_RATE,
+        .baud_rate = SIM7080_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -25,296 +43,260 @@ void sim800l_init(void) {
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    // Install UART driver
-    ESP_ERROR_CHECK(uart_driver_install(SIM800L_UART_PORT, SIM800L_UART_BUF_SIZE, 0, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(SIM800L_UART_PORT, &uart_config));
+    uart_driver_install(SIM7080_UART_PORT, SIM7080_UART_BUF_SIZE, 0, 0, NULL, 0);
+    uart_param_config(SIM7080_UART_PORT, &uart_config);
+    uart_set_pin(SIM7080_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-    // Set UART pins
-    ESP_ERROR_CHECK(uart_set_pin(SIM800L_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    // Configure power and reset pins as outputs
     gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
+    gpio_set_direction(RAIL_4V_EN, GPIO_MODE_OUTPUT);
 
-    // Initially power off the SIM800L
-    sim800l_power_off();
-}
-
-void sim800l_power_on(void) {
-    // Toggle the power key to power on the SIM800L
-    ESP_LOGW(TAG, "Powering on SIM800L");
-    gpio_set_level(MODEM_PWR_KEY, 1);
+    sim7080_power_off();  // Optional reset before init
     vTaskDelay(pdMS_TO_TICKS(1000));
-    gpio_set_level(MODEM_PWR_KEY, 0);
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for the module to power on
+    sim7080_power_on();
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
 }
 
-void sim800l_power_off(void) {
-    // Toggle the power key to power off the SIM800L
-    ESP_LOGW(TAG, "Powering off SIM800L");
+void sim7080_power_on(void) {
+    ESP_LOGI(TAG, "Powering on SIM7080G");
+    gpio_set_level(RAIL_4V_EN, 1);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    gpio_set_level(MODEM_PWR_KEY, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
     gpio_set_level(MODEM_PWR_KEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(1200));
+    vTaskDelay(pdMS_TO_TICKS(500));
     gpio_set_level(MODEM_PWR_KEY, 0);
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for the module to power off
+  // wait for modem boot
 }
 
-
-
-void sim800l_send_command(const char* command) {
-    // Send AT command to the SIM800L
-    uart_write_bytes(SIM800L_UART_PORT, command, strlen(command));
-    uart_write_bytes(SIM800L_UART_PORT, "\r\n", 2);
+void sim7080_power_off(void) {
+    ESP_LOGI(TAG, "Powering off SIM7080G");
+    gpio_set_level(RAIL_4V_EN, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
-int sim800l_read_response(char* buffer, uint32_t buffer_size) {
-    // Read response from the SIM800L
-    int len = uart_read_bytes(SIM800L_UART_PORT, (uint8_t*)buffer, buffer_size - 1, pdMS_TO_TICKS(5000));
-    if (len > 0) {
-        buffer[len] = '\0'; // Null-terminate the received string
+void sim7080_send_command(const char *cmd) {
+    uart_write_bytes(SIM7080_UART_PORT, cmd, strlen(cmd));
+    uart_write_bytes(SIM7080_UART_PORT, "\r\n", 2);
+}
+
+int sim7080_read_response(char *buffer, uint32_t buffer_size, int timeout_ms) {
+    int total_len = 0;
+    int len = 0;
+    const int chunk_timeout_ms = 100;
+
+    uint32_t start_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    while ((xTaskGetTickCount() * portTICK_PERIOD_MS - start_time) < timeout_ms && total_len < buffer_size - 1) {
+        len = uart_read_bytes(SIM7080_UART_PORT, (uint8_t *)buffer + total_len,
+                              buffer_size - 1 - total_len, pdMS_TO_TICKS(chunk_timeout_ms));
+
+        if (len > 0) {
+            total_len += len;
+            buffer[total_len] = '\0';
+
+            // Exit early on standard terminators
+            if (strstr(buffer, "\r\nOK\r\n") || strstr(buffer, "\r\nERROR\r\n")) {
+                break;
+            }
+        }
     }
-    return len;
+
+    return total_len;
 }
 
-void send_at_command_test(const char* command) {
-    char response[1024];  // Buffer to hold the response from SIM800L
 
-    // Log the command being sent
+void send_at_command_test(const char *command) {
+    char response[1024];
+
     ESP_LOGI(TAG, "Sending command: %s", command);
+    sim7080_send_command(command);
 
-    // Send the AT command
-    sim800l_send_command(command);
-
-    // Read the response from the SIM800L
-    int len = sim800l_read_response(response, sizeof(response));
-
-    // Check if a response was received
+    int len = sim7080_read_response(response, sizeof(response),3000);
     if (len > 0) {
-        // Null-terminate and log the response
         response[len] = '\0';
         ESP_LOGI(TAG, "Received response: %s", response);
     } else {
-        // Log that no response was received
-        ESP_LOGW(TAG, "No response received for command: %s", command);
+        ESP_LOGW(TAG, "No response received");
     }
+}
+
+bool sim7080_network_init(void) {
+    char response[512];
+    int rssi = 0;
+    int attempt = 0;
+
+    // 1. Wait for SIM to be ready
+    ESP_LOGI("SIM7080", "Waiting for SIM (AT+CPIN?)...");
+    for (int i = 0; i < 30; i++) {
+        sim7080_send_command("AT+CPIN?");
+        if (sim7080_read_response(response, sizeof(response), 3000) > 0 &&
+            strstr(response, "+CPIN: READY")) {
+            ESP_LOGI("SIM7080", "SIM is ready.");
+            break;
+        }
+        ESP_LOGW("SIM7080", "SIM not ready yet...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    // 2. Set APN
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
+    sim7080_send_command(cmd);
+    sim7080_read_response(response, sizeof(response), 3000);
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 3. Set LTE-only + Cat-M1 mode
+    sim7080_send_command("AT+CNMP=38");  // LTE only
+    sim7080_read_response(response, sizeof(response), 3000);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    sim7080_send_command("AT+CMNB=1");   // Cat-M1 only
+    sim7080_read_response(response, sizeof(response), 3000);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // 4. Set auto-operator selection
+    sim7080_send_command("AT+COPS=0");
+    sim7080_read_response(response, sizeof(response), 3000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // 5. Long operator scan
+    ESP_LOGI("SIM7080", "Scanning for available networks (AT+COPS=?)...");
+    sim7080_send_command("AT+COPS=?");
+    if (sim7080_read_response(response, sizeof(response), 90000) > 0) {
+        ESP_LOGI("SIM7080", "Operator scan result:\n%s", response);
+    } else {
+        ESP_LOGW("SIM7080", "No operators found or scan timed out.");
+    }
+
+    // 6. Wait for network registration
+    ESP_LOGI("SIM7080", "Waiting for network registration...");
+    while (true) {
+        // Get signal strength
+        sim7080_send_command("AT+CSQ");
+        if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
+            char *csq = strstr(response, "+CSQ:");
+            if (csq) {
+                sscanf(csq, "+CSQ: %d", &rssi);
+                if (rssi == 99) {
+                    ESP_LOGW("SIM7080", "[%02d] Signal: Unknown (99)", attempt);
+                } else {
+                    ESP_LOGI("SIM7080", "[%02d] Signal strength (RSSI): %d", attempt, rssi);
+                }
+            }
+        }
+
+        // Get network registration
+        sim7080_send_command("AT+CEREG?");
+        if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
+            char *reg = strstr(response, "+CEREG:");
+            if (reg) {
+                ESP_LOGI("SIM7080", "[%02d] Registration status: %s", attempt, reg);
+
+                if (strstr(reg, ",1") || strstr(reg, ",5")) {
+                    ESP_LOGI("SIM7080", "✅ Modem registered to the network.");
+                    return true;
+                } else if (strstr(reg, ",3")) {
+                    ESP_LOGE("SIM7080", "❌ Registration denied.");
+                    return false;
+                }
+            }
+        }
+
+        attempt++;
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    return false; // should never hit
 }
 
 
 
 
+void sim7080_publish(const char *topic, const char *message) {
+    char cmd[128];
 
-void send_sms(const char* phone_number, const char* message) {
-    char response[1024];
-    char command[160];
+    int msg_len = strlen(message);
+    snprintf(cmd, sizeof(cmd), "AT+SMPUB=\"%s\",%d,1,0", topic, msg_len);
 
-    // Ensure SIM800L is initialized and powered on before calling this function
+    send_at_command_test(cmd);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Set SMS text mode
-    ESP_LOGI(TAG, "Setting SMS to text mode");
-    sim800l_send_command("AT+CMGF=1");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0'; // Ensure the response is null-terminated
-        ESP_LOGI(TAG, "Response to AT+CMGF=1: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGF command");
-    }
+    sim7080_send_command(message);
+    uart_write_bytes(SIM7080_UART_PORT, "\x1A", 1); // Send Ctrl+Z
 
-    // Prepare command to set the recipient's phone number
-    snprintf(command, sizeof(command), "AT+CMGS=\"%s\"", phone_number);
-    ESP_LOGI(TAG, "Setting recipient: %s", phone_number);
-    sim800l_send_command(command);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response to AT+CMGS: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGS command");
-    }
-
-    // Send the message text
-    ESP_LOGI(TAG, "Sending message: %s", message);
-    uart_write_bytes(SIM800L_UART_PORT, message, strlen(message));
-
-    // End the message with Ctrl+Z (ASCII 26)
-    uart_write_bytes(SIM800L_UART_PORT, "\x1A", 1);
-    ESP_LOGI(TAG, "Ending message with Ctrl+Z");
-    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait for the message to be sent
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Final response after sending SMS: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No final response received");
-    }
-}
-
-
-
-void read_sms(void) {
-    char response[2048];
-    char command[32];
-    
-    // Ensure SIM800L is initialized and powered on before calling this function
-
-    // Set SMS text mode
-    ESP_LOGI(TAG, "Setting SMS to text mode");
-    sim800l_send_command("AT+CMGF=1");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response to AT+CMGF=1: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGF command");
-    }
-
-    // List all messages
-    ESP_LOGI(TAG, "Listing all SMS messages");
-    sim800l_send_command("AT+CMGL=\"ALL\"");
-    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for response
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Messages: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGL command");
-    }
-}
-
-
-void connect_to_internet(const char* apn, const char* user, const char* password) {
-    char response[1024];
-
-    // Ensure SIM800L is initialized and powered on before calling this function
-
-    // Set the SIM800L to GPRS mode
-    ESP_LOGI(TAG, "Setting SIM800L to GPRS mode");
-    sim800l_send_command("AT+SAPBR=3,1,\"Contype\",\"GPRS\"");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for GPRS mode command");
-    }
-
-    // Set the APN
-    ESP_LOGI(TAG, "Setting APN to: %s", apn);
-    char command[128];
-    snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"APN\",\"%s\"", apn);
-    sim800l_send_command(command);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for APN command");
-    }
-
-    // Set the user name, if necessary
-    if (user && strlen(user) > 0) {
-        ESP_LOGI(TAG, "Setting user name: %s", user);
-        snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"USER\",\"%s\"", user);
-        sim800l_send_command(command);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        len = sim800l_read_response(response, sizeof(response));
-        if (len > 0) {
-            response[len] = '\0';
-            ESP_LOGI(TAG, "Response: %s", response);
-        } else {
-            ESP_LOGW(TAG, "No response for USER command");
-        }
-    }
-
-    // Set the password, if necessary
-    if (password && strlen(password) > 0) {
-        ESP_LOGI(TAG, "Setting password");
-        snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"PWD\",\"%s\"", password);
-        sim800l_send_command(command);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        len = sim800l_read_response(response, sizeof(response));
-        if (len > 0) {
-            response[len] = '\0';
-            ESP_LOGI(TAG, "Response: %s", response);
-        } else {
-            ESP_LOGW(TAG, "No response for PWD command");
-        }
-    }
-
-    // Open a GPRS context
-    ESP_LOGI(TAG, "Opening GPRS context");
-    sim800l_send_command("AT+SAPBR=1,1");
-    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for the context to open
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for opening GPRS context");
-    }
-
-    // Query GPRS context status
-    ESP_LOGI(TAG, "Querying GPRS context status");
-    sim800l_send_command("AT+SAPBR=2,1");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-        if (strstr(response, "+SAPBR: 1,1")) {
-            ESP_LOGI(TAG, "GPRS context opened successfully");
-        } else {
-            ESP_LOGW(TAG, "Failed to open GPRS context");
-        }
-    } else {
-        ESP_LOGW(TAG, "No response for GPRS context status");
-    }
-
-    // Get the IP address
-    // ESP_LOGI(TAG, "Getting IP address");
-    // sim800l_send_command("AT+CIFSR");
-    // vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for the IP address
-    // len = sim800l_read_response(response, sizeof(response));
-    // if (len > 0) {
-    //     response[len] = '\0';
-    //     ESP_LOGI(TAG, "IP Address: %s", response);
-    // } else {
-    //     ESP_LOGW(TAG, "No response for IP address request");
-    // }
+    ESP_LOGI("SIM7080", "Published to '%s': %s", topic, message);
 }
 
 
 void modem_task(void *param) {
 
-    //power on modem
-    //sim800l_power_on();
-    //vTaskDelay(1000 / portTICK_PERIOD_MS);
+    char cmd[128];
+    sim7080_init();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    send_at_command_test("AT+COPS=0");   // Auto operator selection
+
+    if (!sim7080_network_init()) {
+        ESP_LOGE("SIM7080", "Network init failed.");
+        vTaskDelete(NULL);
+    }
+
+   
+
+    send_at_command_test("AT");
+
+    // Set APN
+    snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
+    send_at_command_test(cmd);
+
+    // Set APN username and password (if provided)
+    if (strlen(APN_USER) > 0) {
+        snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
+        send_at_command_test(cmd);
+    }
+
+    // Attach to network
+    send_at_command_test("AT+CGATT=1");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Activate PDP context
+    send_at_command_test("AT+CGACT=1,1");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // MQTT config
+    snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"URL\",\"%s\",%d", MQTT_BROKER, MQTT_PORT);
+    send_at_command_test(cmd);
+
+    snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"CLIENTID\",\"%s\"", MQTT_CLIENT_ID);
+    send_at_command_test(cmd);
+
+    if (strlen(MQTT_USERNAME) > 0) {
+        snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"USERNAME\",\"%s\"", MQTT_USERNAME);
+        send_at_command_test(cmd);
+    }
+
+    if (strlen(MQTT_PASSWORD) > 0) {
+        snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"PASSWORD\",\"%s\"", MQTT_PASSWORD);
+        send_at_command_test(cmd);
+    }
+
+    // MQTT connect
+    send_at_command_test("AT+SMCONN");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     
-    // send_at_command_test("AT");
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-
-    // ESP_LOGI(TAG, "Connecting to the internet");
-    // connect_to_internet(APN, USER, PASS);
-    // xEventGroupSetBits(systemEvents, MODEM_GPRS_CON);
-    // ESP_LOGW(TAG, "Signalled modem connected");
 
     
-    // send_sms("07852709248", "Hello World! v3");
-    // ESP_LOGW(TAG, "SMS sent");
 
-
-    // vTaskDelay(10000 / portTICK_PERIOD_MS);
-
-    //read_sms();
-
-    
-    while(1){
-
-    
-    vTaskDelay(pdMS_TO_TICKS(100)); // Add delay to avoid busy looping
+    while (1) {
+        char incoming[512];
+        int len = sim7080_read_response(incoming, sizeof(incoming), 3000);
+        if (len > 0) {
+            ESP_LOGI("MQTT", "Received: %s", incoming);
+        }
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
+

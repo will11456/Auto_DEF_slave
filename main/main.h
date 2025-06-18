@@ -14,10 +14,6 @@
 #include "lvgl.h"
 
 
-// Constants
-#define APN      "wap.vodafone.co.uk"
-#define USER     "wap"
-#define PASS     "wap"
 
 
 //event handlers

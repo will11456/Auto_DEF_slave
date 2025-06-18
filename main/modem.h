@@ -1,32 +1,60 @@
-#ifndef SIM800L_H
-#define SIM800L_H
+#ifndef MODEM_H
+#define MODEM_H
 
 #include <stdint.h>
-#include "esp_log.h"
-#include <driver/uart.h>
-#include <driver/gpio.h>
-#include <string.h>
 
-#define SIM800L_UART_BUF_SIZE 1024
+// ==========================
+// SIM7080G PUBLIC INTERFACE
+// ==========================
 
-// UART configuration
-#define SIM800L_BAUD_RATE 9600
+/**
+ * @brief Initialize UART, GPIOs, power on SIM7080G, and connect to LTE + MQTT broker.
+ * Should be called once from modem_task().
+ */
+void sim7080_init(void);
 
-// SIM800L initialization and control functions
-void sim800l_init(void);
-void sim800l_power_on(void);
-void sim800l_power_off(void);
-void sim800l_reset(void);
+/**
+ * @brief Power on the SIM7080G (toggle PWRKEY, enable rail).
+ */
+void sim7080_power_on(void);
 
-// SIM800L communication functions
-void sim800l_send_command(const char* command);
-void send_at_command_test(const char* command);
-void send_sms(const char* number, const char* message);
-void read_sms(void);
-void connect_to_internet(const char* apn, const char* user, const char* password);
-void modem_task();
+/**
+ * @brief Power off the SIM7080G (disable power rail).
+ */
+void sim7080_power_off(void);
 
-int sim800l_read_response(char* buffer, uint32_t buffer_size);
+/**
+ * @brief Send an AT command (with CRLF) over UART.
+ * @param cmd The command string without CRLF.
+ */
+void sim7080_send_command(const char *cmd);
 
+/**
+ * @brief Read a modem response into buffer.
+ * @param buffer Output buffer.
+ * @param buffer_size Max size of buffer.
+ * @return Number of bytes read.
+ */
+int sim7080_read_response(char *buffer, uint32_t buffer_size, int timeout_ms);
 
-#endif // SIM800L_H
+/**
+ * @brief Send an AT command and log the response (for debug/test).
+ * @param command The command to send.
+ */
+void send_at_command_test(const char *command);
+
+/**
+ * @brief Publish a message to a given MQTT topic.
+ * Must be called only after MQTT connection is established in sim7080_init().
+ * @param topic MQTT topic name (e.g., "sensors/temp")
+ * @param message Payload string to send
+ */
+void sim7080_publish(const char *topic, const char *message);
+
+/**
+ * @brief Modem task entry point.
+ * Handles init and MQTT connect. Call this once during system startup.
+ */
+void modem_task(void *param);
+
+#endif // MODEM_H

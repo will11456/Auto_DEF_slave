@@ -2,9 +2,6 @@
 #define MAIN_PIN_MAP_H_
 
 
-//debug LEDS
-#define DEBUG_LED_1    GPIO_NUM_39
-#define DEBUG_LED_2    GPIO_NUM_40
 
 
 //Modem pin map

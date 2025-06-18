@@ -81,7 +81,7 @@ void publish_task(void *pvParameter){
         //verify the mqtt is up and running
         xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC, json_string, 0,0,0 );
+        sim7080_publish(MQTT_TOPIC, json_string);
         ESP_LOGW(TAG, "published data!");
         cJSON_Delete(root);
         free(json_string);
