@@ -36,19 +36,16 @@ void GPIOInit(void)
     gpio_reset_pin(DEBUG_LED_1);
     gpio_reset_pin(DEBUG_LED_2);
     gpio_reset_pin(MODEM_PWR_KEY);
-    gpio_reset_pin(MODEM_RST);
     gpio_reset_pin(RAIL_4V_EN);
 
     gpio_set_direction(DEBUG_LED_1, GPIO_MODE_OUTPUT);
     gpio_set_direction(DEBUG_LED_2, GPIO_MODE_OUTPUT);
     gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
-    gpio_set_direction(MODEM_RST, GPIO_MODE_OUTPUT);
     gpio_set_direction(RAIL_4V_EN, GPIO_MODE_OUTPUT);
 
     gpio_set_level(DEBUG_LED_1, 0);
     gpio_set_level(DEBUG_LED_2, 0);
     gpio_set_level(MODEM_PWR_KEY, 0);
-    gpio_set_level(MODEM_RST, 0);
     gpio_set_level(RAIL_4V_EN, 0);
 }
 

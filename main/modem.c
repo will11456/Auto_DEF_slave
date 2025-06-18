@@ -34,7 +34,6 @@ void sim800l_init(void) {
 
     // Configure power and reset pins as outputs
     gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
-    gpio_set_direction(MODEM_RST, GPIO_MODE_OUTPUT);
 
     // Initially power off the SIM800L
     sim800l_power_off();
@@ -58,14 +57,7 @@ void sim800l_power_off(void) {
     vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for the module to power off
 }
 
-void sim800l_reset(void) {
-    // Toggle the reset pin to reset the SIM800L
-    ESP_LOGW(TAG, "Resetting SIM800L");
-    gpio_set_level(MODEM_RST, 0);
-    vTaskDelay(pdMS_TO_TICKS(105));
-    gpio_set_level(MODEM_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(3000)); // Wait for the module to reset
-}
+
 
 void sim800l_send_command(const char* command) {
     // Send AT command to the SIM800L

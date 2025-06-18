@@ -2,7 +2,7 @@
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/smart-def-tank-slave-v01")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/auto_def_slave")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -39,10 +39,10 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/build/esp-idf/mbedtls/mbedtls/include/cmake_install.cmake")
-  include("C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/build/esp-idf/mbedtls/mbedtls/3rdparty/cmake_install.cmake")
-  include("C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/build/esp-idf/mbedtls/mbedtls/library/cmake_install.cmake")
-  include("C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/build/esp-idf/mbedtls/mbedtls/pkgconfig/cmake_install.cmake")
+  include("C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/mbedtls/mbedtls/include/cmake_install.cmake")
+  include("C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/mbedtls/mbedtls/3rdparty/cmake_install.cmake")
+  include("C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/mbedtls/mbedtls/library/cmake_install.cmake")
+  include("C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/mbedtls/mbedtls/pkgconfig/cmake_install.cmake")
 
 endif()
 

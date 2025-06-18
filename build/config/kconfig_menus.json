@@ -31068,6 +31068,75 @@
                     {
                         "children": [],
                         "depends_on": null,
+                        "help": "If enabled (default), the esp-modem automatically defragments CMUX messages\nto only pass the completed CMUX message to higher layers.\nThis is useful for messages in command mode (if they're received fragmented).\nIt's not a problem for messages in data mode as the upper layer (PPP protocol)\ndefines message boundaries.\nKeep the default to true for most cases (as most devices use simply 1 byte CMUX\nlength, as the internal Rx buffer of size >= 256 bytes won't overflow)\nSet to false if your devices uses 2 byte CMUX payload (e.g. A7672S).\nThe operation would work without an issue in data mode, but some replies\nin command mode might come fragmented in rare cases so might need to retry\nAT commands.",
+                        "id": "ESP_MODEM_CMUX_DEFRAGMENT_PAYLOAD",
+                        "name": "ESP_MODEM_CMUX_DEFRAGMENT_PAYLOAD",
+                        "range": null,
+                        "title": "Defragment CMUX messages internally",
+                        "type": "bool"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": "If enabled we will process the ongoing AT command by growing the current\nbuffer (if we've run out the preconfigured buffer).\nIf disabled, we simply report a failure.\nUse this if additional allocation is not a problem and you need to reliably process\nall commands, usually with sporadically longer responses than the configured buffer.\nCould be also used to defragment AT replies in CMUX mode if CMUX_DEFRAGMENT_PAYLOAD=n",
+                        "id": "ESP_MODEM_USE_INFLATABLE_BUFFER_IF_NEEDED",
+                        "name": "ESP_MODEM_USE_INFLATABLE_BUFFER_IF_NEEDED",
+                        "range": null,
+                        "title": "Use inflatable buffer in DCE",
+                        "type": "bool"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": "Some devices might need a pause before sending SABM command that creates\nvirtual terminal. This delay applies only to establishing a CMUX mode.\nThe typical reason for failing SABM request without a delay is that\nsome devices (SIM800) send MSC requests just after opening a new DLCI.",
+                        "id": "ESP_MODEM_CMUX_DELAY_AFTER_DLCI_SETUP",
+                        "name": "ESP_MODEM_CMUX_DELAY_AFTER_DLCI_SETUP",
+                        "range": null,
+                        "title": "Delay in ms to wait before creating another virtual terminal",
+                        "type": "int"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": "If enabled, the CMUX protocol would only use 1 byte size field.\nYou can use this option for devices that support only short CMUX payloads\nto make the protocol more robust on noisy environments or when underlying\ntransport gets corrupted often (for example by Rx buffer overflows)",
+                        "id": "ESP_MODEM_CMUX_USE_SHORT_PAYLOADS_ONLY",
+                        "name": "ESP_MODEM_CMUX_USE_SHORT_PAYLOADS_ONLY",
+                        "range": null,
+                        "title": "CMUX to support only short payloads (<128 bytes)",
+                        "type": "bool"
+                    },
+                    {
+                        "children": [
+                            {
+                                "children": [],
+                                "depends_on": "ESP_MODEM_ADD_CUSTOM_MODULE",
+                                "help": "Name of the header file in the main component which implements esp_modem_create_custom_dce()\ncalled from C-API for creating esp_modem_dce object.\nThis header provides definition of the custom module with some additional and/or updated commands\nand API. It also defines creation of DCE based on this custom module, typically calling:\ndce_factory::Factory::create_unique_dce_from<CustomModule, DCE*>(dce_config, std::move(dte), netif)\nPlease refer to the pppos_client example for more details.",
+                                "id": "ESP_MODEM_CUSTOM_MODULE_HEADER",
+                                "name": "ESP_MODEM_CUSTOM_MODULE_HEADER",
+                                "range": null,
+                                "title": "Header file name which defines custom DCE creation",
+                                "type": "string"
+                            }
+                        ],
+                        "depends_on": null,
+                        "help": "If enabled, we adapt the C-API to create a DCE from a user defined class",
+                        "id": "ESP_MODEM_ADD_CUSTOM_MODULE",
+                        "name": "ESP_MODEM_ADD_CUSTOM_MODULE",
+                        "range": null,
+                        "title": "Add support for custom module in C-API",
+                        "type": "bool"
+                    }
+                ],
+                "depends_on": null,
+                "id": "component-config-esp-modem",
+                "title": "esp-modem",
+                "type": "menu"
+            },
+            {
+                "children": [
+                    {
+                        "children": [],
+                        "depends_on": null,
                         "help": null,
                         "id": "LV_CONF_SKIP",
                         "name": "LV_CONF_SKIP",
@@ -34119,75 +34188,6 @@
                 "depends_on": null,
                 "id": "component-config-lvgl-configuration",
                 "title": "LVGL configuration",
-                "type": "menu"
-            },
-            {
-                "children": [
-                    {
-                        "children": [],
-                        "depends_on": null,
-                        "help": "If enabled (default), the esp-modem automatically defragments CMUX messages\nto only pass the completed CMUX message to higher layers.\nThis is useful for messages in command mode (if they're received fragmented).\nIt's not a problem for messages in data mode as the upper layer (PPP protocol)\ndefines message boundaries.\nKeep the default to true for most cases (as most devices use simply 1 byte CMUX\nlength, as the internal Rx buffer of size >= 256 bytes won't overflow)\nSet to false if your devices uses 2 byte CMUX payload (e.g. A7672S).\nThe operation would work without an issue in data mode, but some replies\nin command mode might come fragmented in rare cases so might need to retry\nAT commands.",
-                        "id": "ESP_MODEM_CMUX_DEFRAGMENT_PAYLOAD",
-                        "name": "ESP_MODEM_CMUX_DEFRAGMENT_PAYLOAD",
-                        "range": null,
-                        "title": "Defragment CMUX messages internally",
-                        "type": "bool"
-                    },
-                    {
-                        "children": [],
-                        "depends_on": null,
-                        "help": "If enabled we will process the ongoing AT command by growing the current\nbuffer (if we've run out the preconfigured buffer).\nIf disabled, we simply report a failure.\nUse this if additional allocation is not a problem and you need to reliably process\nall commands, usually with sporadically longer responses than the configured buffer.\nCould be also used to defragment AT replies in CMUX mode if CMUX_DEFRAGMENT_PAYLOAD=n",
-                        "id": "ESP_MODEM_USE_INFLATABLE_BUFFER_IF_NEEDED",
-                        "name": "ESP_MODEM_USE_INFLATABLE_BUFFER_IF_NEEDED",
-                        "range": null,
-                        "title": "Use inflatable buffer in DCE",
-                        "type": "bool"
-                    },
-                    {
-                        "children": [],
-                        "depends_on": null,
-                        "help": "Some devices might need a pause before sending SABM command that creates\nvirtual terminal. This delay applies only to establishing a CMUX mode.\nThe typical reason for failing SABM request without a delay is that\nsome devices (SIM800) send MSC requests just after opening a new DLCI.",
-                        "id": "ESP_MODEM_CMUX_DELAY_AFTER_DLCI_SETUP",
-                        "name": "ESP_MODEM_CMUX_DELAY_AFTER_DLCI_SETUP",
-                        "range": null,
-                        "title": "Delay in ms to wait before creating another virtual terminal",
-                        "type": "int"
-                    },
-                    {
-                        "children": [],
-                        "depends_on": null,
-                        "help": "If enabled, the CMUX protocol would only use 1 byte size field.\nYou can use this option for devices that support only short CMUX payloads\nto make the protocol more robust on noisy environments or when underlying\ntransport gets corrupted often (for example by Rx buffer overflows)",
-                        "id": "ESP_MODEM_CMUX_USE_SHORT_PAYLOADS_ONLY",
-                        "name": "ESP_MODEM_CMUX_USE_SHORT_PAYLOADS_ONLY",
-                        "range": null,
-                        "title": "CMUX to support only short payloads (<128 bytes)",
-                        "type": "bool"
-                    },
-                    {
-                        "children": [
-                            {
-                                "children": [],
-                                "depends_on": "ESP_MODEM_ADD_CUSTOM_MODULE",
-                                "help": "Name of the header file in the main component which implements esp_modem_create_custom_dce()\ncalled from C-API for creating esp_modem_dce object.\nThis header provides definition of the custom module with some additional and/or updated commands\nand API. It also defines creation of DCE based on this custom module, typically calling:\ndce_factory::Factory::create_unique_dce_from<CustomModule, DCE*>(dce_config, std::move(dte), netif)\nPlease refer to the pppos_client example for more details.",
-                                "id": "ESP_MODEM_CUSTOM_MODULE_HEADER",
-                                "name": "ESP_MODEM_CUSTOM_MODULE_HEADER",
-                                "range": null,
-                                "title": "Header file name which defines custom DCE creation",
-                                "type": "string"
-                            }
-                        ],
-                        "depends_on": null,
-                        "help": "If enabled, we adapt the C-API to create a DCE from a user defined class",
-                        "id": "ESP_MODEM_ADD_CUSTOM_MODULE",
-                        "name": "ESP_MODEM_ADD_CUSTOM_MODULE",
-                        "range": null,
-                        "title": "Add support for custom module in C-API",
-                        "type": "bool"
-                    }
-                ],
-                "depends_on": null,
-                "id": "component-config-esp-modem",
-                "title": "esp-modem",
                 "type": "menu"
             }
         ],

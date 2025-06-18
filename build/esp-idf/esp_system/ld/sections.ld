@@ -1,6 +1,6 @@
 /* Automatically generated file; DO NOT EDIT */
 /* Espressif IoT Development Framework Linker Script */
-/* Generated from: C:\Users\WillHandley\Documents\Firmware_development\Smart_DEF_Tank\smart-def-tank-slave-v01\build\esp-idf\esp_system\ld\sections.ld.in */
+/* Generated from: C:\Users\WillHandley\Documents\Firmware_development\Auto_DEF\Auto_DEF_slave\build\esp-idf\esp_system\ld\sections.ld.in */
 
 /*
 

@@ -5,4 +5,5 @@ SET(SOURCES screens/ui_DataScreen.c
     )
 
     idf_component_register(SRCS ${SOURCES}
-    INCLUDE_DIRS ".")
+    INCLUDE_DIRS "."
+    REQUIRES lvgl)

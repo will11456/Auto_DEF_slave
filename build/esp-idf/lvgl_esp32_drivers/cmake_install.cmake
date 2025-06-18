@@ -1,8 +1,8 @@
-# Install script for directory: C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/components/lvgl_esp32_drivers
+# Install script for directory: C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/lvgl_esp32_drivers
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/smart-def-tank-slave-v01")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/auto_def_slave")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 

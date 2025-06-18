@@ -87,6 +87,7 @@ void run_display_task(void *pvParameter)
     /* Initialize SPI or I2C bus used by the drivers */
     lvgl_driver_init();
 
+
     static lv_disp_draw_buf_t disp_buf1;
     static lv_color_t buf1_1[DISP_BUF_SIZE];            //DISP_BUF_SIZE
     static lv_color_t buf1_2[DISP_BUF_SIZE];            //DISP_BUF_SIZE
@@ -100,7 +101,7 @@ void run_display_task(void *pvParameter)
     disp_drv.hor_res = 320;
     disp_drv.ver_res = 240;
     disp_drv.antialiasing = 1;
-    disp_drv.rotated = 0;
+    //disp_drv.rotated = 0;
     
 
     lv_disp_t *disp = lv_disp_drv_register(&disp_drv);

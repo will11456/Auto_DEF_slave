@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#include "C:\Users\WillHandley\Documents\Firmware_development\Smart_DEF_Tank\smart-def-tank-slave-v01\managed_components\lvgl__lvgl\lvgl.h"
+#include "lvgl.h"
 
 #include "ui_helpers.h"
 #include "ui_events.h"

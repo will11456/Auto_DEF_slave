@@ -1,4 +1,4 @@
-/* * Data converted from C:/Users/WillHandley/Documents/Firmware_development/Smart_DEF_Tank/smart-def-tank-slave-v01/build/esp-idf/mbedtls/x509_crt_bundle
+/* * Data converted from C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/mbedtls/x509_crt_bundle
  */
 .data
 .section .rodata.embedded
