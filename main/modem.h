@@ -57,4 +57,13 @@ void sim7080_publish(const char *topic, const char *message);
  */
 void modem_task(void *param);
 
+/**
+ * @brief Wait for SIM readiness and usable signal (RSSI ≠ 99).
+ *
+ * @param max_attempts Number of retries.
+ * @param delay_ms Delay between retries in milliseconds.
+ * @return true if ready and signal acquired, false otherwise.
+ */
+bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms);
+
 #endif // MODEM_H

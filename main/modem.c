@@ -76,8 +76,10 @@ void sim7080_power_off(void) {
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
-void sim7080_send_command(const char *cmd) {
-    uart_write_bytes(SIM7080_UART_PORT, cmd, strlen(cmd));
+
+void sim7080_send_command(const char* command) {
+    // Send AT command to the SIM800L
+    uart_write_bytes(SIM7080_UART_PORT, command, strlen(command));
     uart_write_bytes(SIM7080_UART_PORT, "\r\n", 2);
 }
 
@@ -107,106 +109,157 @@ int sim7080_read_response(char *buffer, uint32_t buffer_size, int timeout_ms) {
 }
 
 
-void send_at_command_test(const char *command) {
-    char response[1024];
+void send_at_command(const char *command, int timeout) {
+    char response[1024] = {0};
+    int total_len = 0;
 
     ESP_LOGI(TAG, "Sending command: %s", command);
     sim7080_send_command(command);
 
-    int len = sim7080_read_response(response, sizeof(response),3000);
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Received response: %s", response);
+    uint32_t start_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    while ((xTaskGetTickCount() * portTICK_PERIOD_MS - start_time) < timeout && total_len < sizeof(response) - 1) {
+        int len = uart_read_bytes(SIM7080_UART_PORT, (uint8_t *)response + total_len,
+                                  sizeof(response) - 1 - total_len,
+                                  pdMS_TO_TICKS(100));
+
+        if (len > 0) {
+            total_len += len;
+            response[total_len] = '\0';
+
+            // Check for complete response (OK or ERROR)
+            if (strstr(response, "\r\nOK\r\n") || strstr(response, "\r\nERROR\r\n")) {
+                break;
+            }
+        } else {
+            // No data this chunk
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+
+    if (total_len > 0) {
+        ESP_LOGI(TAG, "Received response:\n%s", response);
     } else {
         ESP_LOGW(TAG, "No response received");
     }
 }
 
+
+bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
+    char response[256];
+    bool sim_ready = false;
+    bool signal_ok = false;
+    int rssi = 0;
+
+    ESP_LOGI("SIM7080", "Waiting for SIM and signal...");
+
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
+        // SIM status
+        sim7080_send_command("AT+CPIN?");
+        if (sim7080_read_response(response, sizeof(response), 3000) > 0 &&
+            strstr(response, "+CPIN: READY")) {
+            sim_ready = true;
+        } else {
+            ESP_LOGW("SIM7080", "[%02d] SIM not ready", attempt + 1);
+        }
+
+        // Signal strength
+        sim7080_send_command("AT+CSQ");
+        if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
+            char *csq_ptr = strstr(response, "+CSQ:");
+            if (csq_ptr) {
+                int rssi_val = 0;
+                if (sscanf(csq_ptr, "+CSQ: %d", &rssi_val) == 1) {
+                    rssi = rssi_val;
+                    if (rssi != 99) {
+                        signal_ok = true;
+                        ESP_LOGI("SIM7080", "Signal acquired (RSSI: %d)", rssi);
+                    } else {
+                        ESP_LOGW("SIM7080", "[%02d] No usable signal (RSSI: 99)", attempt + 1);
+                    }
+                } else {
+                    ESP_LOGW("SIM7080", "[%02d] Failed to parse RSSI", attempt + 1);
+                }
+            }
+        }
+
+        if (sim_ready && signal_ok) {
+            ESP_LOGI("SIM7080", "✅ SIM and signal ready");
+            return true;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+
+    
+    return false;
+}
+
+
+
 bool sim7080_network_init(void) {
+
     char response[512];
     int rssi = 0;
     int attempt = 0;
 
+    send_at_command("AT+CFUN=1", 3000);
+
     // 1. Wait for SIM to be ready
-    ESP_LOGI("SIM7080", "Waiting for SIM (AT+CPIN?)...");
-    for (int i = 0; i < 30; i++) {
-        sim7080_send_command("AT+CPIN?");
-        if (sim7080_read_response(response, sizeof(response), 3000) > 0 &&
-            strstr(response, "+CPIN: READY")) {
-            ESP_LOGI("SIM7080", "SIM is ready.");
-            break;
+    if (!sim7080_wait_for_sim_and_signal(120, 3000)) {
+        return false;
         }
-        ESP_LOGW("SIM7080", "SIM not ready yet...");
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
 
-    // 2. Set APN
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
-    sim7080_send_command(cmd);
-    sim7080_read_response(response, sizeof(response), 3000);
-    vTaskDelay(pdMS_TO_TICKS(500));
 
-    // 3. Set LTE-only + Cat-M1 mode
-    sim7080_send_command("AT+CNMP=38");  // LTE only
-    sim7080_read_response(response, sizeof(response), 3000);
-    vTaskDelay(pdMS_TO_TICKS(200));
 
-    sim7080_send_command("AT+CMNB=1");   // Cat-M1 only
-    sim7080_read_response(response, sizeof(response), 3000);
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    // 4. Set auto-operator selection
-    sim7080_send_command("AT+COPS=0");
-    sim7080_read_response(response, sizeof(response), 3000);
+    send_at_command("AT+CNMP=38", 60000); // Example for UK O2, change as needed
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 5. Long operator scan
-    ESP_LOGI("SIM7080", "Scanning for available networks (AT+COPS=?)...");
-    sim7080_send_command("AT+COPS=?");
-    if (sim7080_read_response(response, sizeof(response), 90000) > 0) {
-        ESP_LOGI("SIM7080", "Operator scan result:\n%s", response);
-    } else {
-        ESP_LOGW("SIM7080", "No operators found or scan timed out.");
-    }
+    send_at_command("AT+CMNB=1", 60000); // Example for UK O2, change as needed
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 6. Wait for network registration
+
+
+    // 4. Set auto-operator selection
+    send_at_command("AT+COPS=0", 60000); // Example for UK O2, change as needed
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+   
+
+    
+    // Wait for network registration with CEREG parsing and RF reset on denial
     ESP_LOGI("SIM7080", "Waiting for network registration...");
+    int reg_denied_count = 0;
+
     while (true) {
-        // Get signal strength
-        sim7080_send_command("AT+CSQ");
-        if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
-            char *csq = strstr(response, "+CSQ:");
-            if (csq) {
-                sscanf(csq, "+CSQ: %d", &rssi);
-                if (rssi == 99) {
-                    ESP_LOGW("SIM7080", "[%02d] Signal: Unknown (99)", attempt);
-                } else {
-                    ESP_LOGI("SIM7080", "[%02d] Signal strength (RSSI): %d", attempt, rssi);
-                }
-            }
-        }
-
-        // Get network registration
+        char response[256];
         sim7080_send_command("AT+CEREG?");
-        if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
-            char *reg = strstr(response, "+CEREG:");
-            if (reg) {
-                ESP_LOGI("SIM7080", "[%02d] Registration status: %s", attempt, reg);
+        int len = sim7080_read_response(response, sizeof(response), 3000);
 
-                if (strstr(reg, ",1") || strstr(reg, ",5")) {
-                    ESP_LOGI("SIM7080", "✅ Modem registered to the network.");
-                    return true;
-                } else if (strstr(reg, ",3")) {
-                    ESP_LOGE("SIM7080", "❌ Registration denied.");
-                    return false;
+        if (len > 0) {
+            response[len] = '\0';
+            ESP_LOGI("SIM7080", "CEREG response: %s", response);
+
+            char *reg_line = strstr(response, "+CEREG:");
+            if (reg_line) {
+                int n, stat;
+                if (sscanf(reg_line, "+CEREG: %d,%d", &n, &stat) == 2) {
+                    ESP_LOGI("SIM7080", "[%02d] Registration status code: %d", attempt, stat);
+
+                    if (stat == 1 || stat == 5) {
+                        ESP_LOGI("SIM7080", "✅ Modem registered to the network.");
+                        return true;
+                        break; // Registration successful
+                    } 
                 }
+                
             }
-        }
+        } 
 
-        attempt++;
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
+
 
     return false; // should never hit
 }
@@ -220,10 +273,10 @@ void sim7080_publish(const char *topic, const char *message) {
     int msg_len = strlen(message);
     snprintf(cmd, sizeof(cmd), "AT+SMPUB=\"%s\",%d,1,0", topic, msg_len);
 
-    send_at_command_test(cmd);
+    send_at_command(cmd, 3000);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    sim7080_send_command(message);
+    send_at_command(message, 3000);
     uart_write_bytes(SIM7080_UART_PORT, "\x1A", 1); // Send Ctrl+Z
 
     ESP_LOGI("SIM7080", "Published to '%s': %s", topic, message);
@@ -233,57 +286,110 @@ void sim7080_publish(const char *topic, const char *message) {
 void modem_task(void *param) {
 
     char cmd[128];
+    char response[512];
     sim7080_init();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    send_at_command_test("AT+COPS=0");   // Auto operator selection
 
     if (!sim7080_network_init()) {
         ESP_LOGE("SIM7080", "Network init failed.");
         vTaskDelete(NULL);
     }
 
-   
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    send_at_command_test("AT");
-
-    // Set APN
+    // 2. Set APN
     snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
-    send_at_command_test(cmd);
+    send_at_command(cmd, 3000);
+    vTaskDelay(pdMS_TO_TICKS(500));
 
-    // Set APN username and password (if provided)
-    if (strlen(APN_USER) > 0) {
-        snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
-        send_at_command_test(cmd);
-    }
+    snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
+    send_at_command(cmd, 3000);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    send_at_command("AT+COPS?", 60000); // log carrier
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
 
     // Attach to network
-    send_at_command_test("AT+CGATT=1");
+    send_at_command("AT+CGATT=1", 10000);
     vTaskDelay(pdMS_TO_TICKS(2000));
+    send_at_command("AT+CGATT?", 10000);
 
     // Activate PDP context
-    send_at_command_test("AT+CGACT=1,1");
+    send_at_command("AT+CGACT=1,1", 10000);
     vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // Check network registration
+    send_at_command("AT+CGDCONT?", 10000);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    send_at_command("AT+CGACT?", 10000);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Get IP address
+    send_at_command("AT+CGPADDR=1", 10000);  
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+
+
+/////////////////////////////
+
+char response2[256];
+char ip[32] = {0};
+int attempt = 0;
+
+ESP_LOGI("SIM7080", "Waiting indefinitely for IP assignment...");
+
+while (true) {
+    sim7080_send_command("AT+CGPADDR=1");
+    int len = sim7080_read_response(response2, sizeof(response2), 3000);
+
+    if (len > 0) {
+        char *addr = strstr(response2, "+CGPADDR:");
+        if (addr) {
+            memset(ip, 0, sizeof(ip));
+            if (sscanf(addr, "+CGPADDR: 1,%31s", ip) == 1 && strlen(ip) > 0 && strcmp(ip, "") != 0) {
+                ESP_LOGI("SIM7080", "✅ IP Assigned: %s", ip);
+                break;
+            }
+        }
+    }
+
+    ESP_LOGW("SIM7080", "[%02d] No IP yet, retrying...", attempt + 1);
+    attempt++;
+    vTaskDelay(pdMS_TO_TICKS(2000));
+}
+
+
+/////////////////////////////////////
+
+
 
     // MQTT config
     snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"URL\",\"%s\",%d", MQTT_BROKER, MQTT_PORT);
-    send_at_command_test(cmd);
+    send_at_command(cmd, 10000);
+    sim7080_read_response(response, sizeof(response), 20000);
+    vTaskDelay(pdMS_TO_TICKS(200));
 
+    // Set MQTT client ID
     snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"CLIENTID\",\"%s\"", MQTT_CLIENT_ID);
-    send_at_command_test(cmd);
+    send_at_command(cmd, 10000);
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     if (strlen(MQTT_USERNAME) > 0) {
         snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"USERNAME\",\"%s\"", MQTT_USERNAME);
-        send_at_command_test(cmd);
+        send_at_command(cmd, 10000);
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     if (strlen(MQTT_PASSWORD) > 0) {
         snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"PASSWORD\",\"%s\"", MQTT_PASSWORD);
-        send_at_command_test(cmd);
+        send_at_command(cmd, 10000);
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     // MQTT connect
-    send_at_command_test("AT+SMCONN");
+    send_at_command("AT+SMCONN", 10000);
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     
