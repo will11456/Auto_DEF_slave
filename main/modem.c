@@ -18,8 +18,8 @@ static const char *TAG = "SIM7080";
 // ==========================
 
 #define APN              "eapn1.net"
-#define APN_USER         "DynamicF"                     
-#define APN_PASS         "DynamicF"                     
+#define APN_USER         "DynamicFF"                     
+#define APN_PASS         "DynamicFF"                     
 
 // MQTT CONFIG
 #define MQTT_BROKER      "mqtt://mqtt.akenza.io"
@@ -171,15 +171,17 @@ bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
                 int rssi_val = 0;
                 if (sscanf(csq_ptr, "+CSQ: %d", &rssi_val) == 1) {
                     rssi = rssi_val;
+                    ESP_LOGI("SIM7080", "[%02d] RSSI: %d", attempt + 1, rssi);
                     if (rssi != 99) {
                         signal_ok = true;
-                        ESP_LOGI("SIM7080", "Signal acquired (RSSI: %d)", rssi);
                     } else {
-                        ESP_LOGW("SIM7080", "[%02d] No usable signal (RSSI: 99)", attempt + 1);
+                        signal_ok = false;
                     }
                 } else {
                     ESP_LOGW("SIM7080", "[%02d] Failed to parse RSSI", attempt + 1);
                 }
+            } else {
+                ESP_LOGW("SIM7080", "[%02d] No +CSQ response", attempt + 1);
             }
         }
 
@@ -191,9 +193,10 @@ bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 
-    
+    ESP_LOGE("SIM7080", "❌ SIM or signal not ready after %d attempts", max_attempts);
     return false;
 }
+
 
 
 
@@ -203,63 +206,69 @@ bool sim7080_network_init(void) {
     int rssi = 0;
     int attempt = 0;
 
-    send_at_command("AT+CFUN=1", 3000);
-
-    // 1. Wait for SIM to be ready
+    
+    //Wait for SIM to be ready
     if (!sim7080_wait_for_sim_and_signal(120, 3000)) {
         return false;
         }
 
 
 
-    send_at_command("AT+CNMP=38", 60000); // Example for UK O2, change as needed
+
+    send_at_command("AT+CNMP=38", 60000); //Only use LTE not GSM
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    send_at_command("AT+CMNB=3", 60000); //use both LTE-M and NB-IOT
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    send_at_command("AT+CMNB=1", 60000); // Example for UK O2, change as needed
-    vTaskDelay(pdMS_TO_TICKS(1000));
+
+
+    send_at_command("AT+CBANDCFG=\"NB-IOT\",3,8,20,28", 3000);    
+    send_at_command("AT+CBANDCFG=\"CAT-M\",1,3,8,20,28", 3000);
+    send_at_command("AT+CFUN=0", 3000);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    send_at_command("AT+CFUN=1", 3000);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    
+
+    
+    //operator scan
+    send_at_command("AT+COPS=?", 1800000);
 
 
 
-    // 4. Set auto-operator selection
+    //Set auto-operator selection
     send_at_command("AT+COPS=0", 60000); // Example for UK O2, change as needed
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-   
-
+    //send_at_command("AT+COPS=1,2,\"23410\",7", 60000); // Example for UK O2, change as needed
     
-    // Wait for network registration with CEREG parsing and RF reset on denial
-    ESP_LOGI("SIM7080", "Waiting for network registration...");
-    int reg_denied_count = 0;
 
+    // Wait for network registration with CEREG parsing and RF reset on denial
+    ESP_LOGW("SIM7080", "Waiting for network registration...");
+    
     while (true) {
-        char response[256];
         sim7080_send_command("AT+CEREG?");
         int len = sim7080_read_response(response, sizeof(response), 3000);
 
         if (len > 0) {
             response[len] = '\0';
-            ESP_LOGI("SIM7080", "CEREG response: %s", response);
 
             char *reg_line = strstr(response, "+CEREG:");
             if (reg_line) {
                 int n, stat;
                 if (sscanf(reg_line, "+CEREG: %d,%d", &n, &stat) == 2) {
-                    ESP_LOGI("SIM7080", "[%02d] Registration status code: %d", attempt, stat);
+                    ESP_LOGI("SIM7080", "Registration status code: %d", stat);
 
                     if (stat == 1 || stat == 5) {
                         ESP_LOGI("SIM7080", "✅ Modem registered to the network.");
                         return true;
-                        break; // Registration successful
-                    } 
-                }
-                
+                    }
+                }        
             }
-        } 
-
-        
+        }
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
-
 
     return false; // should never hit
 }
@@ -290,46 +299,54 @@ void modem_task(void *param) {
     sim7080_init();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
+    send_at_command("AT+CFUN=1", 3000);
+
 
     if (!sim7080_network_init()) {
         ESP_LOGE("SIM7080", "Network init failed.");
         vTaskDelete(NULL);
     }
 
+    //check bands
+    send_at_command("AT+CBANDCFG?", 10000);
+
+    //check network registration
     vTaskDelay(pdMS_TO_TICKS(1000));
+    send_at_command("AT+COPS?", 10000);
 
-    // 2. Set APN
-    snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
-    send_at_command(cmd, 3000);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGW(TAG, "🛠️ Setting up PDP profile using SIMCom commands...");
 
-    snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
-    send_at_command(cmd, 3000);
-    vTaskDelay(pdMS_TO_TICKS(500));
     
-    send_at_command("AT+COPS?", 60000); // log carrier
+    // 1. Set PDP context for index 1
+    send_at_command("AT+CGDCONT=1,\"IP\",\"eapn1.net\"", 10000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // // 2. Set PDP authentication for context 1
+    send_at_command("AT+CGAUTH=1,1,\"DynamicF\",\"DynamicF\"", 8000);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
 
-    // Attach to network
-    send_at_command("AT+CGATT=1", 10000);
+    // // 3. Attach to network
+    send_at_command("AT+CGATT=1", 8000);
     vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // 4. Activate PDP context 1
+    send_at_command("AT+CGACT=1,1", 8000);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    // 5. Check PDP context status
+    send_at_command("AT+CGACT?", 8000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
     send_at_command("AT+CGATT?", 10000);
-
-    // Activate PDP context
-    send_at_command("AT+CGACT=1,1", 10000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // 6. Check PDP context configuration
+    send_at_command("AT+CGDCONT?", 10000);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // Check network registration
-    send_at_command("AT+CGDCONT?", 10000);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    send_at_command("AT+CGACT?", 10000);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    // Get IP address
-    send_at_command("AT+CGPADDR=1", 10000);  
-    vTaskDelay(pdMS_TO_TICKS(200));
-
+    send_at_command("AT+CGAUTH?", 10000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
 
 /////////////////////////////
@@ -341,22 +358,23 @@ int attempt = 0;
 ESP_LOGI("SIM7080", "Waiting indefinitely for IP assignment...");
 
 while (true) {
-    sim7080_send_command("AT+CGPADDR=1");
-    int len = sim7080_read_response(response2, sizeof(response2), 3000);
+    send_at_command("AT+CGPADDR=1", 10000);
+    send_at_command("AT+COPS?", 10000);
+    send_at_command("AT+CEREG?", 10000);
+    
+    
 
-    if (len > 0) {
-        char *addr = strstr(response2, "+CGPADDR:");
-        if (addr) {
-            memset(ip, 0, sizeof(ip));
-            if (sscanf(addr, "+CGPADDR: 1,%31s", ip) == 1 && strlen(ip) > 0 && strcmp(ip, "") != 0) {
+    if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
+        char *line = strstr(response, "+CGPADDR:");
+        if (line) {
+            char ip[32] = {0};
+            if (sscanf(line, "+CGPADDR: 1,%31s", ip) == 1 && strlen(ip) > 0) {
                 ESP_LOGI("SIM7080", "✅ IP Assigned: %s", ip);
                 break;
             }
         }
     }
 
-    ESP_LOGW("SIM7080", "[%02d] No IP yet, retrying...", attempt + 1);
-    attempt++;
     vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
