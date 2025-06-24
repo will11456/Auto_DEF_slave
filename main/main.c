@@ -6,6 +6,8 @@
 #include "uart.h"
 #include "data.h"
 #include "mqtt.h"
+#include "gnss.h"
+
 #include "heartbeat.h"
 #include "publish.h"
 #include "certificates.h"
@@ -69,6 +71,9 @@ void app_main(void)
     xTaskCreatePinnedToCore(uart_task, "uart_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
     xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
     xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*8, NULL, 1, NULL, 1);
+
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    //xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 5, NULL);
     
     
 
