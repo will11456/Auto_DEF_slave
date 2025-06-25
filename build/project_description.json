@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "auto_def_slave",
-    "project_version":    "1f371d5-dirty",
+    "project_version":    "9fe6d4c-dirty",
     "project_path":       "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave",
     "idf_path":           "C:/Users/WillHandley/esp/v5.2.2/esp-idf",
     "build_dir":          "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build",
@@ -1120,7 +1120,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/esp-idf/ui/libui.a",
-            "sources": [ "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/screens/ui_DataScreen.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/ui.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/components/ui_comp_hook.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/ui_helpers.c" ],
+            "sources": [ "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/screens/ui_DataScreen.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/screens/ui_SplashScreen.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/ui.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/components/ui_comp_hook.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/ui_helpers.c", "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/components/ui/images/ui_img_dfs_logo_png_png.c" ],
             "include_dirs": [ "." ]
         },
         "ulp": {

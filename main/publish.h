@@ -24,7 +24,7 @@
 
 
 // Define the MQTT client handle
-static esp_mqtt_client_handle_t client;
+//static esp_mqtt_client_handle_t client;
 
 // Function prototype for the publish task
 void publish_task(void *pvParameter);

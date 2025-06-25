@@ -80,21 +80,7 @@ void handle_message(const DecodedMessage *decoded_msg) {
             //ESP_LOGI(TAG, "recieved NPN_OUT      message ID: %d", decoded_msg->message_id);
             break;
 
-        case MSG_ID_ANALOG_OUT:
-            handle_analog_out_message(decoded_msg);
-            //ESP_LOGI(TAG, "recieved ANALOG_OUT   message ID: %d", decoded_msg->message_id);
-            break;
-
-        case MSG_ID_420_INPUTS:
-            handle_420_inputs_message(decoded_msg);
-            //ESP_LOGI(TAG, "recieved 420_INPUTS   message ID: %d", decoded_msg->message_id);
-            break;
-
-        case MSG_ID_ANALOG_INPUTS:
-            handle_analog_inputs_message(decoded_msg);
-            //ESP_LOGI(TAG, "recieved ANALOG_IN    message ID: %d", decoded_msg->message_id);
-            break;
-
+                
         case MSG_ID_PT1000:
             handle_pt1000_message(decoded_msg);
             //ESP_LOGI(TAG, "recieved PT1000       message ID: %d", decoded_msg->message_id);
@@ -205,13 +191,13 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
         }
         
         if (fuel_float > 101){
-            lv_textarea_set_text(ui_FuelTankTextArea, "-  ");
+            lv_textarea_set_text(ui_AuxTankTextArea, "-  ");
             lv_bar_set_value(ui_ExtTankBar1, 0, LV_ANIM_OFF);
 
         }
 
         else if (fuel_float < 101){
-            lv_textarea_set_text(ui_FuelTankTextArea, fuel_buf);
+            lv_textarea_set_text(ui_AuxTankTextArea, fuel_buf);
             lv_bar_set_value(ui_ExtTankBar1, decoded_msg->data2, LV_ANIM_OFF);
         }
         
@@ -305,140 +291,6 @@ void handle_batt_message(const DecodedMessage *decoded_msg){
             lvgl_unlock();
         }
     }
-
-}
-
-void handle_analog_out_message(const DecodedMessage *decoded_msg){
-
-    float volts_float = (float)decoded_msg->data0/1000.0;
-
-    //ESP_LOGW(TAG, "msg %d", decoded_msg->data0);
-        
-    char volts_buf[32];
-
-    snprintf(volts_buf, 32, "%.2f", volts_float);
-    
-    if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-    {
-        lv_textarea_set_text(ui_AnalogOutTextArea, volts_buf);
-        lvgl_unlock();
-    }
-
-
-}
-
-void handle_420_inputs_message(const DecodedMessage *decoded_msg){
-
-    // // 4-20ma inputs 1
-    // if (decoded_msg->data0 == 65535){
-    //     if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-    //     {
-    //         lv_textarea_set_text(ui_FuelTankTextArea, "-  ");
-    //         lvgl_unlock();
-    //     }
-    // }
-
-    // else{
-    //     float ma_1_float = (float)decoded_msg->data0/100.0;
-
-    //     //ESP_LOGW(TAG, "msg %d", decoded_msg->data0);
-            
-    //     char ma_1_buf[32];
-
-    //     snprintf(ma_1_buf, 32, "%.2f", ma_1_float);
-        
-    //     if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-    //     {
-    //         lv_textarea_set_text(ui_FuelTankTextArea, ma_1_buf);
-    //         lvgl_unlock();
-    //     }
-    // }
-
-
-    // 4-20ma inputs 2
-//     if (decoded_msg->data1 == 65535){
-//             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-//             {
-//                 lv_textarea_set_text(ui_FuelTankTextArea, "-  ");
-//                 lvgl_unlock();
-//             }
-//         }
-
-//     else{
-//         float ma_1_float = (float)decoded_msg->data1/100.0;
-//         float fuel_level = (float)ma_1_float / (20 *100) * 1
-
-//         //ESP_LOGW(TAG, "msg %d", decoded_msg->data1);
-            
-//         char ma_1_buf[32];
-
-//         snprintf(ma_1_buf, 32, "%.2f", ma_1_float);
-        
-//         if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-//         {
-//             lv_textarea_set_text(ui_FuelTankTextArea, ma_1_buf);
-//             lvgl_unlock();
-//         }
-//     }
-
-}
-
-
-
-
-void handle_analog_inputs_message(const DecodedMessage *decoded_msg){
-
-    if (decoded_msg->data0 == 65535){
-        if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-        {
-            lv_textarea_set_text(ui_AnalogIn1TextArea, "-  ");
-            lvgl_unlock();
-        }
-    }
-
-    else{
-
-        float alg_1_float = (float)decoded_msg->data0/1000.0;
-
-        //ESP_LOGW(TAG, "msg %d", decoded_msg->data0);
-            
-        char volts1_buf[32];
-
-        snprintf(volts1_buf, 32, "%.2f", alg_1_float);
-        
-        if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-        {
-            lv_textarea_set_text(ui_AnalogIn1TextArea, volts1_buf);
-            lvgl_unlock();
-        }
-    }
-
-    
-    if (decoded_msg->data1 == 65535){
-        if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-        {
-            lv_textarea_set_text(ui_AnalogIn2TextArea, "-  ");
-            lvgl_unlock();
-        }
-    }
-
-    else{
-        float alg_1_float = (float)decoded_msg->data1/1000.0;
-
-        //ESP_LOGW(TAG, "msg %d", decoded_msg->data1);
-            
-        char volts2_buf[32];
-
-        snprintf(volts2_buf, 32, "%.2f", alg_1_float);
-        
-        if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
-        {
-            lv_textarea_set_text(ui_AnalogIn2TextArea, volts2_buf);
-            lvgl_unlock();
-        }
-    }
-
-
 
 }
 

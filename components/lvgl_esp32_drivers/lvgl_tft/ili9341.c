@@ -142,6 +142,8 @@ void ili9341_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * col
 	ili9341_send_cmd(0x2C);
 	uint32_t size = lv_area_get_width(area) * lv_area_get_height(area);
 	ili9341_send_color((void*)color_map, size * 2);
+
+	lv_disp_flush_ready(drv);
 }
 
 void ili9341_sleep_in()
