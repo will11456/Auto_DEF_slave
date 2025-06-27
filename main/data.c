@@ -149,7 +149,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     uint16_t ext_tank_ma = decoded_msg->data1;
     uint16_t aux_tank_ma  = decoded_msg->data2;
 
-    ESP_LOGW(TAG, "int: %d, ext: %d, aux: %d", int_tank_percent, ext_tank_ma, aux_tank_ma);
+    //ESP_LOGW(TAG, "int: %d, ext: %d, aux: %d", int_tank_percent, ext_tank_ma, aux_tank_ma);
 
     //update the global data structure
     xSemaphoreTake(data_mutex, portMAX_DELAY);
@@ -167,7 +167,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     uint16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * AUX_SENSOR_MAX_MM) / 1600)  /  AUX_TANK_MAX_MM) * 100.0;
 
 
-    ESP_LOGI(TAG, "ext_tank_percent: %d, aux_tank_percent: %d", ext_tank_percent, aux_tank_percent);
+    //ESP_LOGI(TAG, "ext_tank_percent: %d, aux_tank_percent: %d", ext_tank_percent, aux_tank_percent);
 
     snprintf(int_buf, 32, "%d", int_tank_percent);
     snprintf(ext_buf, 32, "%d", ext_tank_percent);

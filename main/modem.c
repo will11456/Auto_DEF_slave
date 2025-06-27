@@ -22,13 +22,13 @@ static const char *TAG = "SIM7080";
 #define APN_PASS         "DynamicFF"                     
 
 // MQTT CONFIG
-#define MQTT_BROKER      "mqtt://mqtt.akenza.io"
+#define MQTT_BROKER      "thingsboard.cloud"
 #define MQTT_PORT        1883
-#define MQTT_CLIENT_ID   "esp32sim7080"
-#define MQTT_USERNAME    "07ac444748e9232b"                     
-#define MQTT_PASSWORD    "7ho0anm3u0q0pa1pgwsxu53nw1xqboi9"                     
+#define MQTT_CLIENT_ID   "esp32_dev1"
+#define MQTT_USERNAME    "mvfr2nhlu6io9yj8uy0e"                     
+#define MQTT_PASSWORD    ""                     
 
-#define MQTT_TOPIC_PUB   "/up/7ho0anm3u0q0pa1pgwsxu53nw1xqboi9/id/E19917E90E406B5E"
+#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
 #define MQTT_MESSAGE     "hello from SIM7080G"
 #define MQTT_TOPIC_SUB   "test/topic"
 
@@ -259,14 +259,6 @@ bool sim7080_network_init(void) {
     send_at_command("AT+COPS=0", 60000); // Example for UK O2, change as needed
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-
-    //reset the modem RF
-    send_at_command("AT+CFUN=0", 3000);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    send_at_command("AT+CFUN=1", 3000);
-    vTaskDelay(pdMS_TO_TICKS(5000));
-
-
    
 
     // Wait for network registration with CEREG parsing and RF reset on denial
@@ -300,21 +292,61 @@ bool sim7080_network_init(void) {
 
 
 
-
 void sim7080_publish(const char *topic, const char *message) {
     char cmd[128];
-
     int msg_len = strlen(message);
+
+    // 1. Send the publish command with topic and length
     snprintf(cmd, sizeof(cmd), "AT+SMPUB=\"%s\",%d,1,0", topic, msg_len);
+    const char *resp = send_at_command(cmd, 2000);
 
-    send_at_command(cmd, 3000);
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // 2. Wait for '>' prompt (ready to receive payload)
+    if (!resp || !strstr(resp, ">")) {
+        ESP_LOGE("SIM7080", "MQTT publish prompt not received");
+        return;
+    }
 
-    send_at_command(message, 3000);
-    uart_write_bytes(SIM7080_UART_PORT, "\x1A", 1); // Send Ctrl+Z
+    // 3. Send the actual payload and end with Ctrl+Z
+    uart_write_bytes(SIM7080_UART_PORT, message, msg_len);
+    uart_write_bytes(SIM7080_UART_PORT, "\x1A", 1); // Ctrl+Z to finish
 
     ESP_LOGI("SIM7080", "Published to '%s': %s", topic, message);
 }
+
+
+
+
+bool wait_for_ip(int timeout_ms) {
+    const char *resp = NULL;
+    uint32_t start_time = xTaskGetTickCount();
+    const int check_interval_ms = 1000;
+
+    while ((xTaskGetTickCount() - start_time) * portTICK_PERIOD_MS < timeout_ms) {
+        resp = send_at_command("AT+CGPADDR=1", 2000);
+        if (resp) {
+            const char *line = strstr(resp, "+CGPADDR: 1,");
+            if (line) {
+                line += strlen("+CGPADDR: 1,");
+                const char *end = strchr(line, '\r');
+                if (end && end > line) {
+                    char ip[32] = {0};
+                    strncpy(ip, line, end - line);
+                    ip[end - line] = '\0';
+
+                    if (strcmp(ip, "0.0.0.0") != 0) {
+                        ESP_LOGI("SIM", "Got IP: %s", ip);
+                        return true;
+                    }
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(check_interval_ms));
+    }
+
+    ESP_LOGW("SIM", "Timeout waiting for IP");
+    return false;
+}
+
 
 
 void modem_task(void *param) {
@@ -333,6 +365,12 @@ void modem_task(void *param) {
         ESP_LOGE("SIM7080", "Network init failed.");
         vTaskDelete(NULL);
     }
+
+    send_at_command("AT+CRESET", 3000);
+    vTaskDelay(pdMS_TO_TICKS(10000));  // 
+
+    send_at_command("AT+COPS?", 3000); //check network connected to
+    
 
     send_at_command("AT+CGNAPN", 3000);
 
@@ -378,37 +416,24 @@ void modem_task(void *param) {
 
 /////////////////////////////
 
-char response2[256];
-char ip[32] = {0};
-int attempt = 0;
+    char response2[256];
+    char ip[32] = {0};
+    int attempt = 0;
 
-ESP_LOGI("SIM7080", "Waiting indefinitely for IP assignment...");
-vTaskDelay(pdMS_TO_TICKS(2000));
-// while (true) {
-//     sim7080_send_command("AT+CGPADDR=1");
+
+    //wait for IP
+    if (wait_for_ip(120000)) {
+        ESP_LOGI("NET", "IP address assigned, ready for MQTT");
+    } else {
+        ESP_LOGE("NET", "Failed to get IP address");
+    }
     
+    //test ping
+    send_at_command("AT+PING=\"8.8.8.8\"", 30000);
     
-    
+    /////////////////////////////////////
 
-//     if (sim7080_read_response(response, sizeof(response), 3000) > 0) {
-//         char *line = strstr(response, "+CGPADDR:");
-//         if (line) {
-//             char ip[32] = {0};
-//             ESP_LOGW(TAG, "response: %s", line);
-//             if (sscanf(line, "+CGPADDR: 1,%31s", ip) == 1 && strlen(ip) > 0) {
-//                 ESP_LOGI("SIM7080", "✅ IP Assigned: %s", ip);
-//                 break;
-//             }
-//         }
-//     }
-
-//     vTaskDelay(pdMS_TO_TICKS(2000));
-// }
-
-
-/////////////////////////////////////
-
-
+    //send_at_command("AT+SMDISC", 3000);
 
     // MQTT config
     snprintf(cmd, sizeof(cmd), "AT+SMCONF=\"URL\",\"%s\",%d", MQTT_BROKER, MQTT_PORT);
@@ -433,20 +458,24 @@ vTaskDelay(pdMS_TO_TICKS(2000));
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 
+
+    send_at_command("AT+SMSSL=0", 10000);
+
+
     // MQTT connect
-    send_at_command("AT+SMCONN", 10000);
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    send_at_command("AT+SMCONN", 30000);
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
+    send_at_command("AT+SMSTATE?", 2000);
+
+    sim7080_publish("v1/devices/me/telemetry", "{\"temp\":25.5}");
 
     
 
     
 
     while (1) {
-        char incoming[512];
-        int len = sim7080_read_response(incoming, sizeof(incoming), 3000);
-        if (len > 0) {
-            ESP_LOGI("MQTT", "Received: %s", incoming);
-        }
+       
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }

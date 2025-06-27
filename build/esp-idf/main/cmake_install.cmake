@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/main
+# Install script for directory: C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/main
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -34,6 +34,6 @@ endif()
 
 # Set default install directory permissions.
 if(NOT DEFINED CMAKE_OBJDUMP)
-  set(CMAKE_OBJDUMP "C:/Users/WillHandley/.espressif/tools/xtensa-esp-elf/esp-13.2.0_20230928/xtensa-esp-elf/bin/xtensa-esp32s3-elf-objdump.exe")
+  set(CMAKE_OBJDUMP "C:/Users/Will/.espressif/tools/xtensa-esp-elf/esp-13.2.0_20230928/xtensa-esp-elf/bin/xtensa-esp32s3-elf-objdump.exe")
 endif()
 

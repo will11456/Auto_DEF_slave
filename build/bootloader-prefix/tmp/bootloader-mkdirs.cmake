@@ -4,19 +4,19 @@
 cmake_minimum_required(VERSION 3.5)
 
 file(MAKE_DIRECTORY
-  "C:/Users/WillHandley/esp/v5.2.2/esp-idf/components/bootloader/subproject"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/tmp"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src"
-  "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp"
+  "C:/Users/Will/esp/v5.2.2/esp-idf/components/bootloader/subproject"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/tmp"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src"
+  "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "C:/Users/WillHandley/Documents/Firmware_development/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()
