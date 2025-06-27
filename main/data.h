@@ -61,7 +61,7 @@ void handle_message(const DecodedMessage *decoded_msg);
 // Handle Functions
 void handle_bme280_message(const DecodedMessage *decoded_msg);
 void handle_tank_message(const DecodedMessage *decoded_msg);
-void handle_pump_message(const DecodedMessage *decoded_msg);
+void handle_mode_message(const DecodedMessage *decoded_msg);
 void handle_comms_message(const DecodedMessage *decoded_msg);
 void handle_24v_out_message(const DecodedMessage *decoded_msg);
 void handle_batt_message(const DecodedMessage *decoded_msg);

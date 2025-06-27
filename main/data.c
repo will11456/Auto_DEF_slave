@@ -11,6 +11,7 @@
 #include "publish.h"
 #include "certificates.h"
 #include "message_ids.h"
+#include "config_values.h"
 
 static const char *TAG = "Data";
 
@@ -60,8 +61,8 @@ void handle_message(const DecodedMessage *decoded_msg) {
             //ESP_LOGI(TAG, "recieved TANK LEVEL   message ID: %d", decoded_msg->message_id);
             break;
 
-        case MSG_ID_PUMP:
-            handle_pump_message(decoded_msg);
+        case MSG_ID_MODE:
+            handle_mode_message(decoded_msg);
             //ESP_LOGI(TAG, "recieved PUMP         message ID: %d", decoded_msg->message_id);
             break;
 
@@ -144,61 +145,87 @@ void handle_bme280_message(const DecodedMessage *decoded_msg) {
 
 void handle_tank_message(const DecodedMessage *decoded_msg) {
 
-    float int_float = (float)decoded_msg->data0;
-    float ext_float = (float)decoded_msg->data1;
-    float fuel_float = (float)decoded_msg->data2;
+    uint16_t int_tank_percent  = decoded_msg->data0;
+    uint16_t ext_tank_ma = decoded_msg->data1;
+    uint16_t aux_tank_ma  = decoded_msg->data2;
 
-    //ESP_LOGW(TAG, "int: %f, ext: %f, fuel: %f", int_float, ext_float, fuel_float);
+    ESP_LOGW(TAG, "int: %d, ext: %d, aux: %d", int_tank_percent, ext_tank_ma, aux_tank_ma);
 
     //update the global data structure
     xSemaphoreTake(data_mutex, portMAX_DELAY);
-    shared_sensor_data.int_tank = int_float;
-    shared_sensor_data.ext_tank = ext_float;
-    shared_sensor_data.fuel_tank = fuel_float;
+    shared_sensor_data.int_tank = int_tank_percent;
+    shared_sensor_data.ext_tank = ext_tank_ma;
+    shared_sensor_data.fuel_tank = aux_tank_ma;
     xSemaphoreGive(data_mutex);
 
     char int_buf[32];
     char ext_buf[32];
-    char fuel_buf[32];
+    char aux_buf[32];
 
-    snprintf(int_buf, 32, "%.0f", int_float);
-    snprintf(ext_buf, 32, "%.0f", ext_float);
-    snprintf(fuel_buf, 32, "%.0f", fuel_float);
+    
+    uint16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * EXT_SENSOR_MAX_MM) / 1600)  /  EXT_TANK_MAX_MM) * 100.0;
+    uint16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * AUX_SENSOR_MAX_MM) / 1600)  /  AUX_TANK_MAX_MM) * 100.0;
+
+
+    ESP_LOGI(TAG, "ext_tank_percent: %d, aux_tank_percent: %d", ext_tank_percent, aux_tank_percent);
+
+    snprintf(int_buf, 32, "%d", int_tank_percent);
+    snprintf(ext_buf, 32, "%d", ext_tank_percent);
+    snprintf(aux_buf, 32, "%d", aux_tank_percent);
+
+
+
 
     if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
     {
 
-        if (ext_float > 101){
+        if (ext_tank_percent == 101){
             lv_textarea_set_text(ui_ExtTankTextArea, "-  ");
             lv_bar_set_value(ui_ExtTankBar, 0, LV_ANIM_OFF);
 
         }
 
-        else if (ext_float < 101){
+        else if (ext_tank_percent < 101){
             lv_textarea_set_text(ui_ExtTankTextArea, ext_buf);
-            lv_bar_set_value(ui_ExtTankBar, decoded_msg->data1, LV_ANIM_OFF);
+            lv_bar_set_value(ui_ExtTankBar, ext_tank_percent, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(ui_ExtTankBar, lv_color_hex(0x03A9F4), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+            if (ext_tank_percent <= 20){
+                lv_obj_set_style_bg_color(ui_ExtTankBar, lv_color_hex(0xFF0000), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+            }
+            
         }
         
-        if (int_float > 101){
+        if (int_tank_percent > 101){
             lv_textarea_set_text(ui_IntTankTextArea, "-  ");
             lv_bar_set_value(ui_IntTankBar, 0, LV_ANIM_OFF);
 
         }
 
-        else if (int_float < 101){
+        else if (int_tank_percent < 101){
             lv_textarea_set_text(ui_IntTankTextArea, int_buf);
-            lv_bar_set_value(ui_IntTankBar, decoded_msg->data0, LV_ANIM_OFF);
+            lv_bar_set_value(ui_IntTankBar, int_tank_percent, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(ui_IntTankBar, lv_color_hex(0x03A9F4), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+            if (int_tank_percent <= 20){
+                lv_obj_set_style_bg_color(ui_IntTankBar, lv_color_hex(0xFF0000), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+            }
         }
         
-        if (fuel_float > 101){
+        if (aux_tank_percent > 101){
             lv_textarea_set_text(ui_AuxTankTextArea, "-  ");
             lv_bar_set_value(ui_ExtTankBar1, 0, LV_ANIM_OFF);
 
         }
 
-        else if (fuel_float < 101){
-            lv_textarea_set_text(ui_AuxTankTextArea, fuel_buf);
-            lv_bar_set_value(ui_ExtTankBar1, decoded_msg->data2, LV_ANIM_OFF);
+        else if (aux_tank_percent < 101){
+            lv_textarea_set_text(ui_AuxTankTextArea, aux_buf);
+            lv_bar_set_value(ui_ExtTankBar1, aux_tank_percent, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(ui_ExtTankBar1, lv_color_hex(0x03A9F4), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+            if (aux_tank_percent <= 20){
+                lv_obj_set_style_bg_color(ui_ExtTankBar1, lv_color_hex(0xFF0000), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+            }
         }
         
         
@@ -210,7 +237,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
 }
 
 
-void handle_pump_message(const DecodedMessage *decoded_msg){
+void handle_mode_message(const DecodedMessage *decoded_msg){
     if (decoded_msg->data0==1){
         if (lvgl_lock(LVGL_LOCK_WAIT_TIME)){
         lv_obj_set_style_text_color(ui_PumpMANTextArea, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -247,7 +274,7 @@ void handle_comms_message(const DecodedMessage *decoded_msg){
         else if (decoded_msg->data0==CAN_DATA){
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
         }
-        else{
+        else if (decoded_msg->data0==CAN_ERROR){
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         lvgl_unlock();
@@ -326,10 +353,12 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Running");
                 lvgl_unlock();
             }
-
+            ESP_LOGW(TAG, "Pump Running");
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Pump Running");
             //ESP_LOGW(TAG, "string: %s", shared_sensor_data.status);
@@ -340,6 +369,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Purging..");
                 lvgl_unlock();
             }
@@ -351,6 +382,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Stopped");
                 lvgl_unlock();
             }
@@ -362,6 +395,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Waiting");
                 lvgl_unlock();
             }
@@ -373,6 +408,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Auto Run");
                 lvgl_unlock();
             }
@@ -384,6 +421,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Filling");
                 lvgl_unlock();
             }
@@ -395,11 +434,24 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
                 lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
                 lv_textarea_set_text(ui_ErrorTextArea, "Purging");
                 lvgl_unlock();
             }
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Auto: Purging");
+            xSemaphoreGive(data_mutex);
+            break;
+
+        case PUMP_ERROR:
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
+            {
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+            xSemaphoreTake(data_mutex, portMAX_DELAY);
+            strcpy(shared_sensor_data.status, "Pump Error");
             xSemaphoreGive(data_mutex);
             break;
         

@@ -573,8 +573,8 @@ void ui_DataScreen_screen_init(void)
     lv_obj_clear_flag(ui_ExtTankBar1, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
                       LV_OBJ_FLAG_SNAPPABLE);     /// Flags
 
-    lv_obj_set_style_bg_color(ui_ExtTankBar1, lv_color_hex(0xAFA504), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ExtTankBar1, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    //lv_obj_set_style_bg_color(ui_ExtTankBar1, lv_color_hex(0xAFA504), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    //lv_obj_set_style_bg_opa(ui_ExtTankBar1, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
 
     ui_AuxTankTextArea = lv_textarea_create(ui_DataScreen);
     lv_obj_set_width(ui_AuxTankTextArea, 49);
