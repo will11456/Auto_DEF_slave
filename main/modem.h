@@ -1,69 +1,51 @@
-#ifndef MODEM_H
-#define MODEM_H
+#ifndef SIM7600_H
+#define SIM7600_H
 
-#include <stdint.h>
+#include <stdbool.h>
 
-// ==========================
-// SIM7080G PUBLIC INTERFACE
-// ==========================
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/**
- * @brief Initialize UART, GPIOs, power on SIM7080G, and connect to LTE + MQTT broker.
- * Should be called once from modem_task().
- */
-void sim7080_init(void);
+// UART port and config
+#define SIM7600_UART_PORT      UART_NUM_2
+#define SIM7600_UART_BUF_SIZE  1024
+#define SIM7600_BAUD_RATE      115200
 
-/**
- * @brief Power on the SIM7080G (toggle PWRKEY, enable rail).
- */
-void sim7080_power_on(void);
+// MQTT configuration (can also be moved to main config header)
+#define MQTT_BROKER      "thingsboard.cloud"
+#define MQTT_PORT        1883
+#define MQTT_CLIENT_ID   "esp32_dev1"
+#define MQTT_USERNAME    "mvfr2nhlu6io9yj8uy0e"
+#define MQTT_PASSWORD    ""
 
-/**
- * @brief Power off the SIM7080G (disable power rail).
- */
-void sim7080_power_off(void);
+#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
+#define MQTT_MESSAGE     "{\"temp\":25.5}"
 
-/**
- * @brief Send an AT command (with CRLF) over UART.
- * @param cmd The command string without CRLF.
- */
-void sim7080_send_command(const char *cmd);
+// APN config
+#define APN              "eapn1.net"
+#define APN_USER         "DynamicFF"
+#define APN_PASS         "DynamicFF"
 
-/**
- * @brief Read a modem response into buffer.
- * @param buffer Output buffer.
- * @param buffer_size Max size of buffer.
- * @return Number of bytes read.
- */
-int sim7080_read_response(char *buffer, uint32_t buffer_size, int timeout_ms);
+// === Public Modem Functions ===
 
-/**
- * @brief Send an AT command and log the response (for debug/test).
- * @param command The command to send.
- */
-void send_at_command_test(const char *command);
+void sim7600_init(void);
+void sim7600_power_on(void);
+void sim7600_power_off(void);
 
-/**
- * @brief Publish a message to a given MQTT topic.
- * Must be called only after MQTT connection is established in sim7080_init().
- * @param topic MQTT topic name (e.g., "sensors/temp")
- * @param message Payload string to send
- */
-void sim7080_publish(const char *topic, const char *message);
+void sim7600_send_command(const char* command);
+int  sim7600_read_response(char *buffer, uint32_t buffer_size, int timeout_ms);
+const char* send_at_command(const char *command, int timeout_ms);
 
-/**
- * @brief Modem task entry point.
- * Handles init and MQTT connect. Call this once during system startup.
- */
+bool sim7600_wait_for_network(int attempts, int delay_ms);
+bool sim7600_network_init(void);
+bool sim7600_mqtt_connect(void);
+bool sim7600_mqtt_publish(const char *topic, const char *message);
+
 void modem_task(void *param);
 
-/**
- * @brief Wait for SIM readiness and usable signal (RSSI ≠ 99).
- *
- * @param max_attempts Number of retries.
- * @param delay_ms Delay between retries in milliseconds.
- * @return true if ready and signal acquired, false otherwise.
- */
-bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms);
+#ifdef __cplusplus
+}
+#endif
 
-#endif // MODEM_H
+#endif // SIM7600_H

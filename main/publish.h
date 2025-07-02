@@ -14,7 +14,6 @@
 #include "esp_system.h"
 #include "cJSON.h"
 #include <string.h>
-#include "certificates.h"
 #include "esp_netif.h"
 #include "esp_netif_ppp.h"
 #include "freertos/idf_additions.h"

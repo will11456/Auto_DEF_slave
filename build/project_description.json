@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "auto_def_slave",
-    "project_version":    "432ee90-dirty",
+    "project_version":    "348949a-dirty",
     "project_path":       "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave",
     "idf_path":           "C:/Users/Will/esp/v5.2.2/esp-idf",
     "build_dir":          "C:/Users/Will/Desktop/DFS Work/Firmware/Auto_DEF/Auto_DEF_slave/build",

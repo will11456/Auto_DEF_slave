@@ -10,7 +10,6 @@
 
 #include "heartbeat.h"
 #include "publish.h"
-#include "certificates.h"
 #include "message_ids.h"
 
 
@@ -70,20 +69,12 @@ void app_main(void)
     xTaskCreatePinnedToCore(run_display_task, "display", 2048*12, NULL, 3, &displayTaskHandle, 0);
     xTaskCreatePinnedToCore(uart_task, "uart_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
     xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
-    //xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*8, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*8, NULL, 1, NULL, 1);
 
     //vTaskDelay(3000 / portTICK_PERIOD_MS);
     //xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 5, NULL);
     
-    
-
-///////////////////////////////MODEM//////////////////////////////////
-
-   
-
-    // //Start MQTT and MQTT Publishing Task
-    // xTaskCreate(mqtt_task, "mqtt_task", 2048*8, NULL, 5, &mqttTaskHandle);
-    // xTaskCreate(publish_task, "publsh_task", 2048*8, NULL, 5, &publishTaskHandle);
+    xTaskCreate(publish_task, "publsh_task", 2048*8, NULL, 5, &publishTaskHandle);
 
 
     

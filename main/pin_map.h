@@ -5,8 +5,8 @@
 
 
 //Modem pin map
-#define MODEM_RX        GPIO_NUM_35
-#define MODEM_TX        GPIO_NUM_34
+#define MODEM_RX        GPIO_NUM_34
+#define MODEM_TX        GPIO_NUM_35
 #define MODEM_PWR_KEY   GPIO_NUM_36
 #define RAIL_4V_EN      GPIO_NUM_21
 

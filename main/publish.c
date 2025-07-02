@@ -6,16 +6,12 @@
 #include "data.h"
 #include "mqtt.h"
 #include "publish.h"
-#include "certificates.h"
 
-// Endpoint IDs:
-// kHGxA0iiPn    - test board
-//  E19917E90E406B5E  - DEF-0004
-//                    - DEF-0005
+
 
 static const char *TAG = "PUBLISH";
 
-#define MQTT_TOPIC  "/up/7ho0anm3u0q0pa1pgwsxu53nw1xqboi9/id/E19917E90E406B5E" // get this from the device iot dashboard
+
 #define MQTT_PUBLISH_FREQ      1 //interval for publishing data in minutes
 
 
@@ -47,25 +43,26 @@ void publish_task(void *pvParameter){
         // Add data to the JSON object
         
         //Only publish the tank values if they are present
-        if (data.int_tank != 65535) {
-            cJSON_AddNumberToObject(root, "Internal_Tank", data.int_tank);
-        }
-        if (data.ext_tank < 65500) {
+        
+        cJSON_AddNumberToObject(root, "Internal_Tank", data.int_tank);
+        
         cJSON_AddNumberToObject(root, "External_Tank", data.ext_tank); 
-        }
-        if (data.fuel_tank < 65500) {       
-        cJSON_AddNumberToObject(root, "Fuel_Tank", data.fuel_tank);
-        }
+        cJSON_AddNumberToObject(root, "Aux_Tank", data.aux_tank);
+
+        cJSON_AddNumberToObject(root, "PT1000", data.pt1000);
+        
 
         cJSON_AddNumberToObject(root, "Battery_volts", data.batt_volt);
+
         cJSON_AddNumberToObject(root, "Temperature", data.temp);
+        cJSON_AddNumberToObject(root, "Pressure", data.pres);
+        cJSON_AddNumberToObject(root, "Humidity", data.rh);
+
+        
         cJSON_AddStringToObject(root, "Mode", data.status);
         cJSON_AddStringToObject(root, "Status", data.mode);
 
 
-        
-
-      
         
          // Convert the cJSON object to a string
         char *json_string = cJSON_PrintUnformatted(root);
@@ -81,7 +78,7 @@ void publish_task(void *pvParameter){
         //verify the mqtt is up and running
         xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-        sim7080_publish(MQTT_TOPIC, json_string);
+        sim7600_mqtt_publish(MQTT_TOPIC_PUB, json_string);
         ESP_LOGW(TAG, "published data!");
         cJSON_Delete(root);
         free(json_string);

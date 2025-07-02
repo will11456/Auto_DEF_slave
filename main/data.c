@@ -9,7 +9,6 @@
 #include "data.h"
 #include "mqtt.h"
 #include "publish.h"
-#include "certificates.h"
 #include "message_ids.h"
 #include "config_values.h"
 
@@ -121,6 +120,8 @@ void handle_bme280_message(const DecodedMessage *decoded_msg) {
     //Update the shared data structure - using mutex
     xSemaphoreTake(data_mutex, portMAX_DELAY);
     shared_sensor_data.temp = temp_float;
+    shared_sensor_data.pres = pres_float;
+    shared_sensor_data.rh = hum_float;
     xSemaphoreGive(data_mutex);
 
     
@@ -145,27 +146,39 @@ void handle_bme280_message(const DecodedMessage *decoded_msg) {
 
 void handle_tank_message(const DecodedMessage *decoded_msg) {
 
-    uint16_t int_tank_percent  = decoded_msg->data0;
-    uint16_t ext_tank_ma = decoded_msg->data1;
-    uint16_t aux_tank_ma  = decoded_msg->data2;
-
+    int16_t int_tank_percent  = decoded_msg->data0;
+    uint16_t ext_tank_ma = decoded_msg->data2;
+    uint16_t aux_tank_ma  = decoded_msg->data1;
     //ESP_LOGW(TAG, "int: %d, ext: %d, aux: %d", int_tank_percent, ext_tank_ma, aux_tank_ma);
 
-    //update the global data structure
-    xSemaphoreTake(data_mutex, portMAX_DELAY);
-    shared_sensor_data.int_tank = int_tank_percent;
-    shared_sensor_data.ext_tank = ext_tank_ma;
-    shared_sensor_data.fuel_tank = aux_tank_ma;
-    xSemaphoreGive(data_mutex);
-
+    
     char int_buf[32];
     char ext_buf[32];
     char aux_buf[32];
 
-    
-    uint16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * EXT_SENSOR_MAX_MM) / 1600)  /  EXT_TANK_MAX_MM) * 100.0;
-    uint16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * AUX_SENSOR_MAX_MM) / 1600)  /  AUX_TANK_MAX_MM) * 100.0;
+    //ESP_LOGI(TAG, "ext_tank_ma: %d, aux_tank_ma: %d", ext_tank_ma, aux_tank_ma);
 
+    
+    int16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * EXT_SENSOR_MAX_MM) / 1600)  /  EXT_TANK_MAX_MM) * 100.0;
+    int16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * AUX_SENSOR_MAX_MM) / 1600)  /  AUX_TANK_MAX_MM) * 100.0;
+
+    if (ext_tank_percent > 100){
+        ext_tank_percent = -1;
+    }
+
+    if (aux_tank_percent > 100){
+        aux_tank_percent = -1;
+    }
+
+    
+
+
+    //update the global data structure
+    xSemaphoreTake(data_mutex, portMAX_DELAY);
+    shared_sensor_data.int_tank = int_tank_percent;
+    shared_sensor_data.ext_tank = ext_tank_percent;
+    shared_sensor_data.aux_tank = aux_tank_percent;
+    xSemaphoreGive(data_mutex);
 
     //ESP_LOGI(TAG, "ext_tank_percent: %d, aux_tank_percent: %d", ext_tank_percent, aux_tank_percent);
 
@@ -179,7 +192,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
     {
 
-        if (ext_tank_percent == 101){
+        if (ext_tank_percent == -1){
             lv_textarea_set_text(ui_ExtTankTextArea, "-  ");
             lv_bar_set_value(ui_ExtTankBar, 0, LV_ANIM_OFF);
 
@@ -196,7 +209,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
             
         }
         
-        if (int_tank_percent > 101){
+        if (int_tank_percent == -1){
             lv_textarea_set_text(ui_IntTankTextArea, "-  ");
             lv_bar_set_value(ui_IntTankBar, 0, LV_ANIM_OFF);
 
@@ -212,7 +225,7 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
             }
         }
         
-        if (aux_tank_percent > 101){
+        if (aux_tank_percent == -1){
             lv_textarea_set_text(ui_AuxTankTextArea, "-  ");
             lv_bar_set_value(ui_ExtTankBar1, 0, LV_ANIM_OFF);
 
@@ -344,7 +357,13 @@ void handle_pt1000_message(const DecodedMessage *decoded_msg){
             lv_textarea_set_text(ui_PT1000TextArea, temp_buf);
             lvgl_unlock();
         }
+
+        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        shared_sensor_data.pt1000 = temp_float;
+        xSemaphoreGive(data_mutex);
     }
+    
+    
 }
 
 void handle_status_message(const DecodedMessage *decoded_msg){

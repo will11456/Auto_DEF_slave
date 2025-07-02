@@ -22,9 +22,12 @@ typedef struct {
     
     float int_tank;
     float ext_tank;
-    float fuel_tank;
+    float aux_tank;
     float batt_volt;
     float temp;
+    float pres;
+    float rh;
+    float pt1000;
     char status[32];
     char mode[32];
 
