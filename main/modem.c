@@ -298,7 +298,7 @@ bool sim7600_network_init(void) {
         send_at_command("AT+CGMR", 10000);
         
         ESP_LOGI(TAG, "🌐 Connecting to broker %s:%d...", broker, port);
-        snprintf(cmd, sizeof(cmd), "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",120,1,\"%s\",\"%s\"", broker, port, user, pass);
+        snprintf(cmd, sizeof(cmd), "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",60,1,\"%s\",\"%s\"", broker, port, user, pass);
         resp = send_at_command(cmd, 10000);
         if (!resp || !strstr(resp, "OK")) {
             ESP_LOGE(TAG, "❌ MQTT connect failed");
