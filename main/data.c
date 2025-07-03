@@ -71,7 +71,7 @@ void handle_message(const DecodedMessage *decoded_msg) {
             break;
 
         case MSG_ID_24V_OUT:
-            handle_24v_out_message(decoded_msg);
+            handle_output_message(decoded_msg);
             //ESP_LOGI(TAG, "recieved 24V_OUT      message ID: %d", decoded_msg->message_id);
             break;
 
@@ -272,6 +272,7 @@ void handle_mode_message(const DecodedMessage *decoded_msg){
         xSemaphoreGive(data_mutex);
     }
     
+    publish_data(); // Publish the mode change to MQTT
 
 }
 
@@ -280,11 +281,21 @@ void handle_comms_message(const DecodedMessage *decoded_msg){
     
     if (lvgl_lock(LVGL_LOCK_WAIT_TIME)){
         if (decoded_msg->data0==CAN_INIT){
+
+            //Update the shared data structure - using mutex
+            xSemaphoreTake(data_mutex, portMAX_DELAY);
+            shared_sensor_data.can_status = false;
+            xSemaphoreGive(data_mutex);
             
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
 
         }
         else if (decoded_msg->data0==CAN_DATA){
+
+            xSemaphoreTake(data_mutex, portMAX_DELAY);
+            shared_sensor_data.can_status = true;
+            xSemaphoreGive(data_mutex);
+
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         else if (decoded_msg->data0==CAN_ERROR){
@@ -296,7 +307,7 @@ void handle_comms_message(const DecodedMessage *decoded_msg){
     
 
 
-void handle_24v_out_message(const DecodedMessage *decoded_msg){
+void handle_output_message(const DecodedMessage *decoded_msg){
 
 }
 
@@ -336,8 +347,9 @@ void handle_batt_message(const DecodedMessage *decoded_msg){
 
 void handle_pt1000_message(const DecodedMessage *decoded_msg){
     
+    int16_t pt1000  = decoded_msg->data0;
 
-    if (decoded_msg->data0 == 65535){
+    if (pt1000 == -1){
         if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
     {
             lv_textarea_set_text(ui_PT1000TextArea, "-  ");

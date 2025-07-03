@@ -7,12 +7,17 @@
 #include <string.h>
 #include <stdio.h>
 #include "display.h"
+#include "freertos/semphr.h"
 
 #define SIM7600_UART_PORT UART_NUM_2
 #define SIM7600_UART_BUF_SIZE 1024
 #define SIM7600_BAUD_RATE 115200
 
 static const char *TAG = "SIM7600";
+
+//mutex to proect UART
+SemaphoreHandle_t at_mutex = NULL;             // Mutex to protect AT command access
+SemaphoreHandle_t publish_trigger = NULL;      //semaphore to trigger publish task
 
 // ===== Configuration =====
 
@@ -32,6 +37,11 @@ static const char *TAG = "SIM7600";
 // ===== UART & GPIO Setup =====
 
 void sim7600_init(void) {
+
+    if (at_mutex == NULL) {
+        at_mutex = xSemaphoreCreateMutex();
+    }
+
     uart_config_t uart_config = {
         .baud_rate = SIM7600_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -170,7 +180,7 @@ bool sim7600_wait_for_ip(int timeout_ms) {
     const char *resp;
     char ip[32] = {0};
 
-    ESP_LOGI(TAG, "🕒 Waiting for IP address (timeout: %d ms)...", timeout_ms);
+    ESP_LOGI(TAG, "🕒 Waiting for IP address (timeout: %d s)...", timeout_ms);
     uint32_t start_time = xTaskGetTickCount();
     const int interval_ms = 2000;
 
@@ -210,7 +220,7 @@ bool sim7600_network_init(void) {
     const char *resp;
 
     //Check network registration
-    int creg_attempts = 500;
+    int creg_attempts = 30;
 
     ESP_LOGI(TAG, "Checking network registration status...");
 
@@ -233,7 +243,7 @@ bool sim7600_network_init(void) {
         }
 
         if (i == creg_attempts - 1) {
-            ESP_LOGE(TAG, "❌ Network registration failed after %d attempts", creg_attempts);
+            ESP_LOGE(TAG, "❌ Network registration failed after %d attempts. Rebooting...", creg_attempts);
             return false;
         }
 
@@ -256,8 +266,12 @@ bool sim7600_network_init(void) {
 
     send_at_command("AT+CGPADDR=1", 3000);
 
+
+    if (!sim7600_wait_for_ip(90)) {
+        ESP_LOGE(TAG, "IP Assign failed");
+        return false;
+    }
     
-    sim7600_wait_for_ip(30);
 
     lvgl_lock(LVGL_LOCK_WAIT_TIME);
     lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -421,27 +435,65 @@ bool sim7600_network_init(void) {
         }
     }
 
+// ===== Modem Functions =====
+
+
+    void modem_update_signal_quality(void) {
+        if (!MODEM_LOCK(1000)) {
+            ESP_LOGW(TAG, "❌ Could not lock modem for signal check");
+            return;
+        }
+
+        const char *resp = send_at_command("AT+CSQ", 3000);
+        MODEM_UNLOCK();
+
+        if (!resp) {
+            ESP_LOGW(TAG, "⚠️ No response to AT+CSQ");
+            return;
+        }
+
+        const char *csq = strstr(resp, "+CSQ:");
+        if (!csq) {
+            ESP_LOGW(TAG, "⚠️ +CSQ not found in response");
+            return;
+        }
+
+        int rssi = 0, ber = 0;
+        if (sscanf(csq, "+CSQ: %d,%d", &rssi, &ber) != 2) {
+            ESP_LOGW(TAG, "⚠️ Failed to parse CSQ response");
+            return;
+        }
+
+        // Update your global or shared telemetry structure
+        shared_sensor_data.csq = rssi;
+
+        ESP_LOGI(TAG, "📶 Signal updated: RSSI = %d, BER = %d", rssi, ber);
+    }
+
+
+
+
 
 // ===== Main Task =====
 
 void modem_task(void *param) {
     sim7600_init();
 
-    if (!sim7080_wait_for_sim_and_signal(50, 3000)) {
+    if (!sim7080_wait_for_sim_and_signal(500, 3000)) {
         ESP_LOGE(TAG, "Network discovery failed");
-        vTaskDelete(NULL);
+        esp_restart(); // Restart if SIM or signal not ready
     }
 
     if (!sim7600_network_init()) {
         ESP_LOGE(TAG, "Network init failed");
-        vTaskDelete(NULL);
+        esp_restart(); // Restart if network init failed
     }
 
 
     
     if (!sim7600_mqtt_cmqtt_setup(MQTT_BROKER, MQTT_PORT, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
         ESP_LOGE(TAG, "MQTT connection failed");
-        vTaskDelete(NULL);
+        esp_restart(); // Restart if MQTT connection failed
     }
 
 
@@ -449,6 +501,9 @@ void modem_task(void *param) {
 
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(10000));
+        vTaskDelay(pdMS_TO_TICKS(60000));
+
+        modem_update_signal_quality(); 
+
     }
 }

@@ -1,4 +1,7 @@
 {
-    "idf.portWin": "COM6",
-    "idf.flashType": "UART"
+    "idf.portWin": "COM3",
+    "idf.flashType": "UART",
+    "files.associations": {
+        "freertos.h": "c"
+    }
 }

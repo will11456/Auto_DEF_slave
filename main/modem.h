@@ -7,25 +7,31 @@
 extern "C" {
 #endif
 
-// UART port and config
-#define SIM7600_UART_PORT      UART_NUM_2
-#define SIM7600_UART_BUF_SIZE  1024
-#define SIM7600_BAUD_RATE      115200
 
-// MQTT configuration (can also be moved to main config header)
-#define MQTT_BROKER      "thingsboard.cloud"
+// ===== Configuration =====
+
+#define APN              "eapn1.net"
+#define APN_USER         "DynamicF"
+#define APN_PASS         "DynamicF"
+
+#define MQTT_BROKER      "eu.thingsboard.cloud"
 #define MQTT_PORT        1883
 #define MQTT_CLIENT_ID   "esp32_dev1"
-#define MQTT_USERNAME    "mvfr2nhlu6io9yj8uy0e"
-#define MQTT_PASSWORD    ""
+#define MQTT_USERNAME    "dev"
+#define MQTT_PASSWORD    "dev"
 
 #define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
-#define MQTT_MESSAGE     "{\"temp\":25.5}"
 
-// APN config
-#define APN              "eapn1.net"
-#define APN_USER         "DynamicFF"
-#define APN_PASS         "DynamicFF"
+extern SemaphoreHandle_t at_mutex;
+extern SemaphoreHandle_t publish_trigger; // Semaphore to trigger
+
+//Mutex to protect UART access
+#define MODEM_LOCK(timeout_ms) \
+    (xSemaphoreTake(at_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+
+#define MODEM_UNLOCK() \
+    xSemaphoreGive(at_mutex)
+
 
 // === Public Modem Functions ===
 

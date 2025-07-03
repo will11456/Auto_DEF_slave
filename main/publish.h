@@ -22,8 +22,7 @@
 #include "sdkconfig.h"
 
 
-// Define the MQTT client handle
-//static esp_mqtt_client_handle_t client;
+void publish_data(void);
 
 // Function prototype for the publish task
 void publish_task(void *pvParameter);
