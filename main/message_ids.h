@@ -40,12 +40,14 @@ typedef enum {
     AUTO_ROUTINE_PURGING,
     PUMP_ERROR,
     
+    
 } status_messages_t;
 
 //error messages
 typedef enum {                  //goes in status data1
     ERROR_OK = 0,
     FILL_ERROR,
+    COMM_ERROR,
     
 } error_messages_t;
 

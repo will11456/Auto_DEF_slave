@@ -1,5 +1,6 @@
 
 
+#include "freertos/idf_additions.h"
 #include "hal/uart_types.h"
 #include "pin_map.h"
 #include "main.h"
@@ -288,15 +289,16 @@ void handle_comms_message(const DecodedMessage *decoded_msg){
             xSemaphoreGive(data_mutex);
             
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
-
+            publish_data();
         }
         else if (decoded_msg->data0==CAN_DATA){
 
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             shared_sensor_data.can_status = true;
             xSemaphoreGive(data_mutex);
-
+            
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
+            publish_data();
         }
         else if (decoded_msg->data0==CAN_ERROR){
             lv_obj_set_style_text_color(ui_CANTextArea, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -394,6 +396,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             strcpy(shared_sensor_data.status, "Pump Running");
             //ESP_LOGW(TAG, "string: %s", shared_sensor_data.status);
             xSemaphoreGive(data_mutex);
+            publish_data();
 
             break;
         case PUMP_PURGING:
@@ -408,6 +411,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Pump Purging");
             xSemaphoreGive(data_mutex);
+            publish_data();
             break;
         case PUMP_STOPPED:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -421,6 +425,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Pump Stopped");
             xSemaphoreGive(data_mutex);
+            publish_data();
             break;
         case PUMP_WAITING_TO_START:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -434,6 +439,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Pump Waiting");
             xSemaphoreGive(data_mutex);
+            publish_data();
             break;
         case AUTO_ROUTINE_CHECKING:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -447,6 +453,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Auto: Running");
             xSemaphoreGive(data_mutex);
+            publish_data();
             break;
         case AUTO_ROUTINE_FILLING:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -460,6 +467,7 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Auto: Filling");
             xSemaphoreGive(data_mutex);
+            publish_data();
             break;
         case AUTO_ROUTINE_PURGING:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -473,6 +481,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Auto: Purging");
             xSemaphoreGive(data_mutex);
+            publish_data();
+
             break;
 
         case PUMP_ERROR:
@@ -481,9 +491,8 @@ void handle_status_message(const DecodedMessage *decoded_msg){
                 lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
                 lvgl_unlock();
             }
-            xSemaphoreTake(data_mutex, portMAX_DELAY);
-            strcpy(shared_sensor_data.status, "Pump Error");
-            xSemaphoreGive(data_mutex);
+            vTaskDelay(20/ portTICK_PERIOD_MS);
+            publish_data();
             break;
         
         
@@ -502,6 +511,19 @@ void handle_status_message(const DecodedMessage *decoded_msg){
             }
             xSemaphoreTake(data_mutex, portMAX_DELAY);
             strcpy(shared_sensor_data.status, "Fill Error");
+            xSemaphoreGive(data_mutex);
+            break;
+
+        case COMM_ERROR:
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
+            {
+                lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_textarea_set_text(ui_ErrorTextArea, "Comm Error");
+                lvgl_unlock();
+            }
+
+            xSemaphoreTake(data_mutex, portMAX_DELAY);
+            strcpy(shared_sensor_data.status, "Comm Error");
             xSemaphoreGive(data_mutex);
             break;
     }
