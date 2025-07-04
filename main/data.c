@@ -351,16 +351,22 @@ void handle_pt1000_message(const DecodedMessage *decoded_msg){
     
     int16_t pt1000  = decoded_msg->data0;
 
+    
+
     if (pt1000 == -1){
         if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
     {
             lv_textarea_set_text(ui_PT1000TextArea, "-  ");
             lvgl_unlock();
     }
+
+    xSemaphoreTake(data_mutex, portMAX_DELAY);
+    shared_sensor_data.pt1000 = pt1000;
+    xSemaphoreGive(data_mutex);
     }
 
     else{
-        float temp_float = (float)decoded_msg->data0/10.0 - 50;
+        float temp_float = (float)pt1000/10.0 - 50;
         
         char temp_buf[32];
 
