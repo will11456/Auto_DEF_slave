@@ -1,104 +1,125 @@
 #include "gnss.h"
-#include <stdio.h>
-#include <string.h>
-#include <stdbool.h>
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "freertos/idf_additions.h"
+#include "pin_map.h"
+#include "main.h"
+#include "modem.h"
+#include "display.h"
+#include "uart.h"
+#include "data.h"
+#include "mqtt.h"
+#include "publish.h"
 
 #define GNSS_TASK_DELAY_MS 60000
 static const char *TAG = "GNSS";
 
-// Provided externally
 extern const char* send_at_command(const char *command, int timeout_ms);
 
-// Parse a +CGNSINF line into location struct
-static bool parse_gnss_line(const char *line, GnssLocation *loc) {
-    int run, fix;
-    char utc[32];
-    float lat, lon, alt;
+// Parse a +CGPSINFO line into location struct
+static bool parse_gpsinfo_line(const char *line, GNSSLocation *shared_gnss_data) {
+    char lat_str[16], lat_dir;
+    char lon_str[16], lon_dir;
+    char date[16], time[16];
+    float altitude = 0.0;
 
-    int n = sscanf(line, "+CGNSINF: %d,%d,%31[^,],%f,%f,%f", &run, &fix, utc, &lat, &lon, &alt);
-    if (n < 6 || fix != 1) {
-        ESP_LOGW(TAG, "No valid fix or parse failure. Fields: %d, Fix: %d", n, fix);
+    int fields = sscanf(line, "+CGPSINFO: %15[^,],%c,%15[^,],%c,%15[^,],%15[^,],%f",
+                        lat_str, &lat_dir, lon_str, &lon_dir, date, time, &altitude);
+    if (fields < 7 || lat_str[0] == '\0' || lon_str[0] == '\0') {
+        ESP_LOGW(TAG, "Invalid GPS fix or parse failure. Fields: %d", fields);
         return false;
     }
 
-    loc->latitude = lat;
-    loc->longitude = lon;
-    loc->altitude = alt;
+    // Convert to decimal degrees
+    float lat = atof(lat_str);
+    float lon = atof(lon_str);
+
+    int lat_deg = (int)(lat / 100);
+    int lon_deg = (int)(lon / 100);
+    float lat_min = lat - (lat_deg * 100);
+    float lon_min = lon - (lon_deg * 100);
+
+    lat = lat_deg + lat_min / 60.0;
+    lon = lon_deg + lon_min / 60.0;
+
+    if (lat_dir == 'S') lat = -lat;
+    if (lon_dir == 'W') lon = -lon;
+
+    xSemaphoreTake(gnss_mutex, portMAX_DELAY);
+    shared_gnss_data->latitude = lat;
+    shared_gnss_data->longitude = lon;
+    shared_gnss_data->altitude = altitude;
+    xSemaphoreGive(gnss_mutex);
+
     return true;
 }
 
-// Extract +CGNSINF: line from multiline response
-static const char* extract_cgnsinf_line(const char *resp) {
+// Extract +CGPSINFO: line from response
+static const char* extract_gpsinfo_line(const char *resp) {
     static char line[256];
-    const char *ptr = resp;
+    const char *ptr = strstr(resp, "+CGPSINFO:");
+    if (!ptr) return NULL;
 
-    while (ptr && *ptr) {
-        const char *end = strstr(ptr, "\r\n");
-        if (!end) break;
+    const char *end = strstr(ptr, "\r\n");
+    if (!end) return NULL;
 
-        size_t len = end - ptr;
-        if (len > 0 && len < sizeof(line) && strncmp(ptr, "+CGNSINF:", 9) == 0) {
-            strncpy(line, ptr, len);
-            line[len] = '\0';
-            return line;
-        }
+    size_t len = end - ptr;
+    if (len >= sizeof(line)) len = sizeof(line) - 1;
 
-        ptr = end + 2;
-    }
-
-    return NULL;
+    strncpy(line, ptr, len);
+    line[len] = '\0';
+    return line;
 }
 
 // Power GNSS on
 bool gnss_power_on(void) {
-    return send_at_command("AT+CGNSPWR=1", 1000) != NULL;
+    return send_at_command("AT+CGPS=1,1", 1000) != NULL;
 }
 
 // Power GNSS off
 bool gnss_power_off(void) {
-    return send_at_command("AT+CGNSPWR=0", 1000) != NULL;
+    return send_at_command("AT+CGPS=0", 1000) != NULL;
 }
 
 // Get GNSS location
-bool gnss_get_location(GnssLocation *loc) {
-    gnss_power_on();  // ensure powered on
-
-    const char *resp = send_at_command("AT+CGNSINF", 2000);
+bool gnss_get_location(GNSSLocation *shared_gnss_data) {
+    const char *resp = send_at_command("AT+CGPSINFO", 2000);
     if (!resp) {
-        ESP_LOGE(TAG, "No response from GNSS");
+        ESP_LOGE(TAG, "No response from GPS");
         return false;
     }
 
-    const char *line = extract_cgnsinf_line(resp);
+    const char *line = extract_gpsinfo_line(resp);
     if (!line) {
-        ESP_LOGE(TAG, "CGNSINF line not found");
+        ESP_LOGE(TAG, "CGPSINFO line not found");
         return false;
     }
 
-    return parse_gnss_line(line, loc);
+    return parse_gpsinfo_line(line, shared_gnss_data);
 }
 
 // GNSS background task
 void gnss_task(void *param) {
-    GnssLocation loc;
+    xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
-    ESP_LOGI(TAG, "GNSS task started");
+    ESP_LOGW(TAG, "GNSS task started");
+
     if (!gnss_power_on()) {
-        ESP_LOGE(TAG, "GNSS failed to power on");
+        ESP_LOGE(TAG, "GPS failed to power on");
         vTaskDelete(NULL);
     }
 
-    vTaskDelay(pdMS_TO_TICKS(30000));  // time for first fix
+    vTaskDelay(pdMS_TO_TICKS(30000));  // Allow GPS to get first fix
+
+    GNSSLocation shared_gnss_data;
 
     while (1) {
-        if (gnss_get_location(&loc)) {
-            printf("GNSS: Lat %.6f, Lon %.6f, Alt %.2f\n",
-                   loc.latitude, loc.longitude, loc.altitude);
+        if (gnss_get_location(&shared_gnss_data)) {
+            ESP_LOGI(TAG, "GPS: Lat %.6f, Lon %.6f, Alt %.2f",
+                     shared_gnss_data.latitude,
+                     shared_gnss_data.longitude,
+                     shared_gnss_data.altitude);
         } else {
-            printf("GNSS: No fix yet\n");
+            ESP_LOGW(TAG, "GPS: No fix or invalid data");
         }
 
         vTaskDelay(pdMS_TO_TICKS(GNSS_TASK_DELAY_MS));

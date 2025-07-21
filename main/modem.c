@@ -252,6 +252,9 @@ bool sim7600_network_init(void) {
     
     send_at_command("AT+CMEE=2", 1000);
     send_at_command("AT+CGATT=1", 5000);
+    send_at_command("AT+CGMR", 5000);
+
+ 
 
 
     char cmd[128];

@@ -1,3 +1,5 @@
+#include "cJSON.h"
+#include "gnss.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
@@ -43,15 +45,18 @@ void publish_task(void *pvParameter){
 
 
         sensor_data_t data;
+        GNSSLocation gnss_data;
 
-        // Lock the mutex before reading shared data
-        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        
+        xSemaphoreTake(data_mutex, portMAX_DELAY);  // Lock the mutex before reading shared data
+        data = shared_sensor_data;  // Copy the shared sensor data to local variable
+        xSemaphoreGive(data_mutex);   // Release the mutex after reading
 
-        // Copy the shared sensor data to local variable
-        data = shared_sensor_data;
+        xSemaphoreTake(gnss_mutex, portMAX_DELAY);  // Lock the mutex before reading GNSS data
+        gnss_data = shared_gnss_data;  // Copy the GNSS data to local variable
+        xSemaphoreGive(gnss_mutex);   // Release the mutex after reading
 
-        // Release the mutex after reading
-        xSemaphoreGive(data_mutex);
+
 
          // Create a cJSON object
         cJSON *root = cJSON_CreateObject();
@@ -79,6 +84,11 @@ void publish_task(void *pvParameter){
         cJSON_AddBoolToObject(root, "Output2", data.out2);
         cJSON_AddBoolToObject(root, "NPN1", data.npn1);
         cJSON_AddBoolToObject(root, "NPN2", data.npn2);
+
+        //GNSS
+        cJSON_AddNumberToObject(root, "Lat", gnss_data.latitude);
+        cJSON_AddNumberToObject(root, "Lon", gnss_data.longitude);
+        cJSON_AddNumberToObject(root, "Alt", gnss_data.altitude);
 
 
         
