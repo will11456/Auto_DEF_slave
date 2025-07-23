@@ -19,12 +19,14 @@
 #include "mqtt_client.h"
 #include "esp_modem_api.h"
 #include "sdkconfig.h"
+#include <time.h>
 
 
 typedef struct {
     float latitude;
     float longitude;
     float altitude;
+    char timestamp[32];  // Unix timestamp of the last fix
 } GNSSLocation;
 
 

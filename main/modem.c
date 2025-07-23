@@ -442,12 +442,13 @@ bool sim7600_network_init(void) {
 
 
     void modem_update_signal_quality(void) {
-        if (!MODEM_LOCK(1000)) {
+        if (!MODEM_LOCK(3000)) {
             ESP_LOGW(TAG, "❌ Could not lock modem for signal check");
             return;
         }
 
         const char *resp = send_at_command("AT+CSQ", 3000);
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Allow time for response to be processed
         MODEM_UNLOCK();
 
         if (!resp) {
@@ -504,9 +505,11 @@ void modem_task(void *param) {
 
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(60000));
 
+        vTaskDelay(pdMS_TO_TICKS(180000));
+        uart_flush(UART_NUM_2);
         modem_update_signal_quality(); 
+        
 
     }
 }

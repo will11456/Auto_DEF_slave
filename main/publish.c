@@ -66,7 +66,8 @@ void publish_task(void *pvParameter){
         }
 
         // Add data to the JSON object
-        
+        data.out1 = true;
+
         cJSON_AddNumberToObject(root, "Internal_Tank", data.int_tank);
         cJSON_AddNumberToObject(root, "External_Tank", data.ext_tank); 
         cJSON_AddNumberToObject(root, "Aux_Tank", data.aux_tank);
@@ -80,8 +81,8 @@ void publish_task(void *pvParameter){
         cJSON_AddNumberToObject(root, "CSQ", data.csq);
         cJSON_AddBoolToObject(root, "CAN_Status", data.can_status);
 
-        cJSON_AddBoolToObject(root, "Output1", data.out1);
-        cJSON_AddBoolToObject(root, "Output2", data.out2);
+        cJSON_AddBoolToObject(root, "OUT1", data.out1);
+        cJSON_AddBoolToObject(root, "OUT2", data.out2);
         cJSON_AddBoolToObject(root, "NPN1", data.npn1);
         cJSON_AddBoolToObject(root, "NPN2", data.npn2);
 
@@ -89,6 +90,8 @@ void publish_task(void *pvParameter){
         cJSON_AddNumberToObject(root, "Lat", gnss_data.latitude);
         cJSON_AddNumberToObject(root, "Lon", gnss_data.longitude);
         cJSON_AddNumberToObject(root, "Alt", gnss_data.altitude);
+        cJSON_AddStringToObject(root, "Timestamp", gnss_data.timestamp);
+
 
 
         

@@ -4,12 +4,13 @@
 #include "main.h"
 #include "modem.h"
 #include "display.h"
+#include "portmacro.h"
 #include "uart.h"
 #include "data.h"
 #include "mqtt.h"
 #include "publish.h"
 
-#define GNSS_TASK_DELAY_MS 60000
+#define GNSS_TASK_DELAY 2
 static const char *TAG = "GNSS";
 
 extern const char* send_at_command(const char *command, int timeout_ms);
@@ -18,11 +19,11 @@ extern const char* send_at_command(const char *command, int timeout_ms);
 static bool parse_gpsinfo_line(const char *line, GNSSLocation *shared_gnss_data) {
     char lat_str[16], lat_dir;
     char lon_str[16], lon_dir;
-    char date[16], time[16];
+    char date[16], time_str[16];
     float altitude = 0.0;
 
     int fields = sscanf(line, "+CGPSINFO: %15[^,],%c,%15[^,],%c,%15[^,],%15[^,],%f",
-                        lat_str, &lat_dir, lon_str, &lon_dir, date, time, &altitude);
+                        lat_str, &lat_dir, lon_str, &lon_dir, date, time_str, &altitude);
     if (fields < 7 || lat_str[0] == '\0' || lon_str[0] == '\0') {
         ESP_LOGW(TAG, "Invalid GPS fix or parse failure. Fields: %d", fields);
         return false;
@@ -43,10 +44,24 @@ static bool parse_gpsinfo_line(const char *line, GNSSLocation *shared_gnss_data)
     if (lat_dir == 'S') lat = -lat;
     if (lon_dir == 'W') lon = -lon;
 
+    // Parse date/time into struct tm
+    struct tm gps_time = {0};
+    sscanf(date, "%2d%2d%2d", &gps_time.tm_mday, &gps_time.tm_mon, &gps_time.tm_year);
+    sscanf(time_str, "%2d%2d%2d", &gps_time.tm_hour, &gps_time.tm_min, &gps_time.tm_sec);
+
+    gps_time.tm_mon -= 1;           // struct tm months start at 0
+    gps_time.tm_year += 100;        // years since 1900; e.g., 24 -> 2024
+
+    time_t timestamp = mktime(&gps_time); // Convert to Unix timestamp (local time)
+
+    
+
     xSemaphoreTake(gnss_mutex, portMAX_DELAY);
     shared_gnss_data->latitude = lat;
     shared_gnss_data->longitude = lon;
     shared_gnss_data->altitude = altitude;
+    strftime(shared_gnss_data->timestamp, sizeof(shared_gnss_data->timestamp),
+    "%Y-%m-%d %H:%M:%S", gmtime(&timestamp));
     xSemaphoreGive(gnss_mutex);
 
     return true;
@@ -110,18 +125,25 @@ void gnss_task(void *param) {
 
     vTaskDelay(pdMS_TO_TICKS(30000));  // Allow GPS to get first fix
 
-    GNSSLocation shared_gnss_data;
+    
 
     while (1) {
+
+        if (!MODEM_LOCK(3000)) {
+            ESP_LOGW(TAG, "❌ Could not lock modem for GNSS task");
+        }
+
         if (gnss_get_location(&shared_gnss_data)) {
-            ESP_LOGI(TAG, "GPS: Lat %.6f, Lon %.6f, Alt %.2f",
+            ESP_LOGI(TAG, "GPS: Lat %.6f, Lon %.6f, Alt %.2f, Time: %s",
                      shared_gnss_data.latitude,
                      shared_gnss_data.longitude,
-                     shared_gnss_data.altitude);
+                     shared_gnss_data.altitude,
+                     shared_gnss_data.timestamp);
         } else {
             ESP_LOGW(TAG, "GPS: No fix or invalid data");
         }
+        MODEM_UNLOCK();
 
-        vTaskDelay(pdMS_TO_TICKS(GNSS_TASK_DELAY_MS));
+        vTaskDelay(GNSS_TASK_DELAY *60000/ portTICK_PERIOD_MS);
     }
 }
