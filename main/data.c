@@ -152,6 +152,35 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     uint16_t aux_tank_ma  = decoded_msg->data1;
     //ESP_LOGW(TAG, "int: %d, ext: %d, aux: %d", int_tank_percent, ext_tank_ma, aux_tank_ma);
 
+    float auxMax = 1.0f;
+    float extMax = 1.0f;
+    float auxRange = 1.0f;
+    float extRange = 1.0f; // Default value if read fails
+
+    //Get the values from NVS
+    esp_err_t err = mqtt_get_aux_range(&auxRange);
+    if (err != ESP_OK) {
+        //ESP_LOGE(TAG, "Failed to get aux range from NVS: %s", esp_err_to_name(err));
+        auxRange = 0.0f; // Default value if read fails
+    }
+
+    err = mqtt_get_ext_range(&extRange);
+    if (err != ESP_OK) {
+        //ESP_LOGE(TAG, "Failed to get ext range from NVS: %s", esp_err_to_name(err));
+        extRange = 0.0f; // Default value if read fails
+    }
+
+    err = mqtt_get_aux_max(&auxMax);
+    if (err != ESP_OK) {
+        //ESP_LOGE(TAG, "Failed to get aux max from NVS: %s", esp_err_to_name(err));
+        auxMax = 0.0f; // Default value if read fails
+    }   
+
+    err = mqtt_get_ext_max(&extMax);
+    if (err != ESP_OK) {
+        //ESP_LOGE(TAG, "Failed to get ext max from NVS: %s", esp_err_to_name(err));
+        extMax = 0.0f; // Default value if read fails
+    }
     
     char int_buf[32];
     char ext_buf[32];
@@ -160,8 +189,8 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     //ESP_LOGI(TAG, "ext_tank_ma: %d, aux_tank_ma: %d", ext_tank_ma, aux_tank_ma);
 
     
-    int16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * EXT_SENSOR_MAX_MM) / 1600)  /  EXT_TANK_MAX_MM) * 100.0;
-    int16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * AUX_SENSOR_MAX_MM) / 1600)  /  AUX_TANK_MAX_MM) * 100.0;
+    int16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * 1000 * extRange) / 1600)  /  1000 * extMax) * 100.0;
+    int16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * 1000 * auxRange) / 1600)  /  1000 * auxMax) * 100.0;
 
     if (ext_tank_percent > 100){
         ext_tank_percent = -1;

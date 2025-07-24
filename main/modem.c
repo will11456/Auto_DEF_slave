@@ -1,3 +1,4 @@
+#include "mqtt.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
@@ -13,7 +14,10 @@
 #define SIM7600_UART_BUF_SIZE 1024
 #define SIM7600_BAUD_RATE 115200
 
-static const char *TAG = "SIM7600";
+#define EVENT_QUEUE_LEN    20
+#define AT_RESP_QUEUE_LEN  20
+
+static const char *TAG = "MODEM";
 
 //mutex to proect UART
 SemaphoreHandle_t at_mutex = NULL;             // Mutex to protect AT command access
@@ -32,7 +36,18 @@ SemaphoreHandle_t publish_trigger = NULL;      //semaphore to trigger publish ta
 #define MQTT_PASSWORD    "dev"
 
 #define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
+#define MQTT_ATTR_PUBLISH "v1/devices/me/attributes"
+#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes/updates"
+#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"
 
+//qeueu setup
+static QueueHandle_t uart_queue;  // Queue for unsolicited UART events
+static QueueHandle_t at_resp_queue;  // Queue for AT command responses
+
+// Expose AT-response queue to send_at_command()
+QueueHandle_t monitor_get_at_resp_queue(void) {
+    return at_resp_queue;
+}
 
 // ===== UART & GPIO Setup =====
 
@@ -51,7 +66,7 @@ void sim7600_init(void) {
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    uart_driver_install(SIM7600_UART_PORT, SIM7600_UART_BUF_SIZE, 0, 0, NULL, 0);
+    uart_driver_install(SIM7600_UART_PORT, UART_BUF_SIZE, 0, EVENT_QUEUE_LEN, &uart_queue, 0);
     uart_param_config(SIM7600_UART_PORT, &uart_config);
     uart_set_pin(SIM7600_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
@@ -109,17 +124,29 @@ const char* send_at_command(const char *command, int timeout_ms) {
     static char response[1024];
     response[0] = '\0';
 
-    sim7600_send_command(command);
-    int len = sim7600_read_response(response, sizeof(response), timeout_ms);
+    // Retrieve the AT-response queue
+    QueueHandle_t resp_q = monitor_get_at_resp_queue();
+    if (!resp_q) {
+        ESP_LOGE(TAG, "AT response queue not initialized");
+        return NULL;
+    }
 
-    if (len > 0 && response[0] != '\0') {
-        ESP_LOGI(TAG, "AT response: %.*s", len, response);
+    // Flush any stale entries
+    xQueueReset(resp_q);
+
+    sim7600_send_command(command);
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+
+    // Wait for a single response line
+    if (xQueueReceive(resp_q, &response, ticks) == pdTRUE) {
+        // Log and return the full response
+        ESP_LOGI(TAG, "<< %s", response);
         return response;
     } else {
         ESP_LOGW(TAG, "No valid response for: %s", command);
         return NULL;
     }
-}
+    }
 
 // ===== Network Init =====
 
@@ -129,7 +156,7 @@ bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
     bool signal_ok = false;
     int rssi = 0;
 
-    ESP_LOGI("SIM7600", "Waiting for SIM and signal...");
+    ESP_LOGI(TAG, "Waiting for SIM and signal...");
 
     for (int attempt = 0; attempt < max_attempts; attempt++) {
         // SIM status
@@ -138,7 +165,7 @@ bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
             strstr(response, "+CPIN: READY")) {
             sim_ready = true;
         } else {
-            ESP_LOGW("SIM7600", "[%02d] SIM not ready", attempt + 1);
+            ESP_LOGW(TAG, "[%02d] SIM not ready", attempt + 1);
         }
 
         // Signal strength
@@ -149,29 +176,29 @@ bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
                 int rssi_val = 0;
                 if (sscanf(csq_ptr, "+CSQ: %d", &rssi_val) == 1) {
                     rssi = rssi_val;
-                    ESP_LOGI("SIM7600", "[%02d] RSSI: %d", attempt + 1, rssi);
+                    ESP_LOGI(TAG, "[%02d] RSSI: %d", attempt + 1, rssi);
                     if (rssi != 99) {
                         signal_ok = true;
                     } else {
                         signal_ok = false;
                     }
                 } else {
-                    ESP_LOGW("SIM7600", "[%02d] Failed to parse RSSI", attempt + 1);
+                    ESP_LOGW(TAG, "[%02d] Failed to parse RSSI", attempt + 1);
                 }
             } else {
-                ESP_LOGW("SIM7600", "[%02d] No +CSQ response", attempt + 1);
+                ESP_LOGW(TAG, "[%02d] No +CSQ response", attempt + 1);
             }
         }
 
         if (sim_ready && signal_ok) {
-            ESP_LOGI("SIM7600", "✅ SIM and signal ready");
+            ESP_LOGI(TAG, "✅ SIM and signal ready");
             return true;
         }
 
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 
-    ESP_LOGE("SIM7600", "❌ SIM or signal not ready after %d attempts", max_attempts);
+    ESP_LOGE(TAG, "❌ SIM or signal not ready after %d attempts", max_attempts);
     return false;
 }
 
@@ -324,6 +351,14 @@ bool sim7600_network_init(void) {
 
         ESP_LOGI(TAG, "✅ MQTT connected to ThingsBoard");
 
+        //Subscribe to telemetry attributes
+        sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1);
+        sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1);
+
+        //Publish stored attributes
+        publish_stored_attributes();
+
+
         xEventGroupSetBits(systemEvents, MQTT_INIT);
 
         lvgl_lock(LVGL_LOCK_WAIT_TIME);
@@ -335,47 +370,10 @@ bool sim7600_network_init(void) {
 
 
     //Publish
-    bool sim7600_mqtt_cmqtt_publish(const char *topic, const char *payload) {
-        char cmd[64];
-        const char *resp;
-        int topic_len = strlen(topic);
-        int payload_len = strlen(payload);
-
-        ESP_LOGI(TAG, "📤 Publishing to topic: %s", topic);
-
-        snprintf(cmd, sizeof(cmd), "AT+CMQTTTOPIC=0,%d", topic_len);
-        resp = send_at_command(cmd, 3000);
-        if (!resp || !strstr(resp, ">")) {
-            ESP_LOGE(TAG, "❌ Failed to set topic");
-            return false;
-        }
-        uart_write_bytes(SIM7600_UART_PORT, topic, topic_len);
-        ESP_LOGI(TAG, "topic: %s, len: %d", topic, topic_len);
-
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        snprintf(cmd, sizeof(cmd), "AT+CMQTTPAYLOAD=0,%d", payload_len);
-        resp = send_at_command(cmd, 3000);
-        if (!resp || !strstr(resp, ">")) {
-            ESP_LOGE(TAG, "❌ Failed to set payload");
-            return false;
-        }
-        uart_write_bytes(SIM7600_UART_PORT, payload, payload_len);
-
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        resp = send_at_command("AT+CMQTTPUB=0,1,60,0", 5000);
-        if (!resp || !strstr(resp, "OK")) {
-            ESP_LOGE(TAG, "❌ Publish failed");
-            return false;
-        }
-
-        ESP_LOGI(TAG, "✅ Publish success");
-        return true;
-    }
+    
 
     //Subscribe
-    bool sim7600_mqtt_cmqtt_subscribe(const char *topic, int qos) {
+    bool sim7600_mqtt_subscribe(const char *topic, int qos) {
         char cmd[64];
         const char *resp;
         int topic_len = strlen(topic);
@@ -402,7 +400,7 @@ bool sim7600_network_init(void) {
         return true;
     }
 
-
+    //Publish Function
     bool sim7600_mqtt_publish(const char *topic, const char *payload) {
         char cmd[128];
         const char *resp;
@@ -501,15 +499,57 @@ void modem_task(void *param) {
     }
 
 
-    //subscribe to attributes here
-
-
     while (1) {
 
         vTaskDelay(pdMS_TO_TICKS(180000));
         uart_flush(UART_NUM_2);
         modem_update_signal_quality(); 
-        
+    }
+}
 
+
+// Task: reads UART events, dispatches attribute URCs and AT responses
+void monitor_task(void *arg) {
+    at_resp_queue = xQueueCreate(AT_RESP_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
+
+    uart_event_t event;
+    uint8_t data[UART_BUF_SIZE];
+    char line[SIM7600_UART_BUF_SIZE];
+    size_t idx = 0;
+
+    ESP_LOGI(TAG, "Monitor task started");
+    while (1) {
+        // Wait for UART event
+        if (xQueueReceive(uart_queue, &event, portMAX_DELAY)) {
+            if (event.type == UART_DATA) {
+                int len = uart_read_bytes(SIM7600_UART_PORT, data, event.size, portMAX_DELAY);
+                for (int i = 0; i < len; i++) {
+                    char c = (char)data[i];
+                    if (c == '\r') continue;
+                    if (c == '\n' || idx >= SIM7600_UART_BUF_SIZE - 1) {
+                        line[idx] = '\0';
+                        if (idx > 0) {
+                            //SP_LOGI(TAG, "Line: %s", line);
+                            // If it's an attribute update URC
+                            if (strstr(line, "+QMTRECV:") ) {
+                                mqtt_handle_urc(line);
+                            } else {
+                                // Otherwise treat as AT response
+                                xQueueSend(at_resp_queue, &line, 0);
+                                //ESP_LOGW(TAG, "sent into queue");
+                            }
+                        }
+                        idx = 0;
+                    } else {
+                        line[idx++] = c;
+                    }
+                }
+            } else if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL) {
+                uart_flush_input(SIM7600_UART_PORT);
+                xQueueReset(uart_queue);
+                idx = 0;
+                ESP_LOGW(TAG, "UART overflow");
+            }
+        }
     }
 }

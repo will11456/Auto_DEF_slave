@@ -47,8 +47,10 @@ bool sim7600_wait_for_network(int attempts, int delay_ms);
 bool sim7600_network_init(void);
 bool sim7600_mqtt_connect(void);
 bool sim7600_mqtt_publish(const char *topic, const char *message);
+bool sim7600_mqtt_subscribe(const char *topic, int qos);
 
 void modem_task(void *param);
+void monitor_task(void *param);
 
 #ifdef __cplusplus
 }

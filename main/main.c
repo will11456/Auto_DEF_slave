@@ -7,10 +7,12 @@
 #include "data.h"
 #include "mqtt.h"
 #include "gnss.h"
+#include "main.h"
 
 #include "heartbeat.h"
 #include "publish.h"
 #include "message_ids.h"
+
 
 
 TaskHandle_t displayTaskHandle = NULL;
@@ -44,7 +46,14 @@ void GPIOInit(void)
     gpio_set_level(RAIL_4V_EN, 0);
 }
 
-
+void mqtt_nvs_init(void) {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+}
 
 void app_main(void)
 {
@@ -54,6 +63,9 @@ void app_main(void)
     gnss_mutex = xSemaphoreCreateMutex();
 
     systemEvents = xEventGroupCreate();
+
+    mqtt_nvs_init();
+
 
     GPIOInit();
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -66,7 +78,6 @@ void app_main(void)
     gpio_set_level(RAIL_4V_EN, 1);
 
     
-    
 ////////////////////////////TASKS///////////////////////////////////
 
     // Start Tasks
@@ -74,6 +85,8 @@ void app_main(void)
     xTaskCreatePinnedToCore(uart_task, "uart_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
     xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
     xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*8, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(monitor_task, "monitor_task", 2048*8, NULL, 1, NULL, 1);
+
 
     vTaskDelay(3000 / portTICK_PERIOD_MS);
     xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 5, NULL);
