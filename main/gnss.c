@@ -86,17 +86,17 @@ static const char* extract_gpsinfo_line(const char *resp) {
 
 // Power GNSS on
 bool gnss_power_on(void) {
-    return send_at_command("AT+CGPS=1,1", 1000) != NULL;
+    return send_at_command("AT+CGPS=1,1", 5000) != NULL;
 }
 
 // Power GNSS off
 bool gnss_power_off(void) {
-    return send_at_command("AT+CGPS=0", 1000) != NULL;
+    return send_at_command("AT+CGPS=0", 5000) != NULL;
 }
 
 // Get GNSS location
 bool gnss_get_location(GNSSLocation *shared_gnss_data) {
-    const char *resp = send_at_command("AT+CGPSINFO", 2000);
+    const char *resp = send_at_command("AT+CGPSINFO", 5000);
     if (!resp) {
         ESP_LOGE(TAG, "No response from GPS");
         return false;

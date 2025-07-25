@@ -11,7 +11,7 @@
 #include "freertos/semphr.h"
 
 #define SIM7600_UART_PORT UART_NUM_2
-#define SIM7600_UART_BUF_SIZE 1024
+#define SIM7600_UART_BUF_SIZE 4096
 #define SIM7600_BAUD_RATE 115200
 
 #define EVENT_QUEUE_LEN    20
@@ -37,17 +37,14 @@ SemaphoreHandle_t publish_trigger = NULL;      //semaphore to trigger publish ta
 
 #define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
 #define MQTT_ATTR_PUBLISH "v1/devices/me/attributes"
-#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes/updates"
+#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"
 #define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"
 
-//qeueu setup
+//queue setup
 static QueueHandle_t uart_queue;  // Queue for unsolicited UART events
-static QueueHandle_t at_resp_queue;  // Queue for AT command responses
+QueueHandle_t at_resp_queue;      // Queue for AT command responses
 
-// Expose AT-response queue to send_at_command()
-QueueHandle_t monitor_get_at_resp_queue(void) {
-    return at_resp_queue;
-}
+
 
 // ===== UART & GPIO Setup =====
 
@@ -69,6 +66,11 @@ void sim7600_init(void) {
     uart_driver_install(SIM7600_UART_PORT, UART_BUF_SIZE, 0, EVENT_QUEUE_LEN, &uart_queue, 0);
     uart_param_config(SIM7600_UART_PORT, &uart_config);
     uart_set_pin(SIM7600_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    at_resp_queue = xQueueCreate(AT_RESP_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
+    if (at_resp_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create at_resp_queue");
+}
 
     gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
     gpio_set_direction(RAIL_4V_EN, GPIO_MODE_OUTPUT);
@@ -121,67 +123,86 @@ int sim7600_read_response(char *buffer, uint32_t buffer_size, int timeout_ms) {
 }
 
 const char* send_at_command(const char *command, int timeout_ms) {
-    static char response[1024];
+    static char response[SIM7600_UART_BUF_SIZE];
     response[0] = '\0';
 
-    // Retrieve the AT-response queue
-    QueueHandle_t resp_q = monitor_get_at_resp_queue();
-    if (!resp_q) {
-        ESP_LOGE(TAG, "AT response queue not initialized");
-        return NULL;
-    }
+    vTaskDelay(50 / portTICK_PERIOD_MS); // Small delay to allow previous commands to settle
 
-    // Flush any stale entries
-    xQueueReset(resp_q);
+    // Drain old responses
+    char temp[SIM7600_UART_BUF_SIZE];
+    while (xQueueReceive(at_resp_queue, temp, 0) == pdTRUE);
 
     sim7600_send_command(command);
-    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    ESP_LOGI(TAG, ">> %s", command);
 
-    // Wait for a single response line
-    if (xQueueReceive(resp_q, &response, ticks) == pdTRUE) {
-        // Log and return the full response
-        ESP_LOGI(TAG, "<< %s", response);
+    TickType_t start = xTaskGetTickCount();
+    TickType_t wait = pdMS_TO_TICKS(timeout_ms);
+    bool got_any_line = false;
+
+    while ((xTaskGetTickCount() - start) < wait) {
+        if (xQueueReceive(at_resp_queue, temp, pdMS_TO_TICKS(500)) == pdTRUE) {
+            // Log each line as it arrives
+            //ESP_LOGI(TAG, "LINE << %s", temp);
+
+            // Append to the cumulative response buffer
+            strncat(response, temp, SIM7600_UART_BUF_SIZE - strlen(response) - 2);
+            strncat(response, "\n", SIM7600_UART_BUF_SIZE - strlen(response) - 1);
+
+            got_any_line = true;
+
+            // Stop when OK/ERROR or '>' prompt is found
+            if (strcmp(temp, "OK") == 0 || strcmp(temp, "ERROR") == 0 || strstr(temp, ">")) {
+                ESP_LOGI(TAG, "<< [Complete Response]\n%s", response);
+                return response;
+            }
+        }
+    }
+
+    if (got_any_line) {
+        // Return partial response (no OK/ERROR seen)
+        ESP_LOGW(TAG, "<< [Partial Response]\n%s", response);
         return response;
-    } else {
-        ESP_LOGW(TAG, "No valid response for: %s", command);
-        return NULL;
     }
-    }
+
+    ESP_LOGW(TAG, "❌ No valid response (timeout %d ms) for: %s", timeout_ms, command);
+    return NULL;
+}
+
+
+
+
+
 
 // ===== Network Init =====
 
 bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
-    char response[256];
+    const char *resp;
     bool sim_ready = false;
     bool signal_ok = false;
     int rssi = 0;
 
     ESP_LOGI(TAG, "Waiting for SIM and signal...");
+    vTaskDelay(3000 / portTICK_PERIOD_MS); // Allow time for SIM to initialize
 
     for (int attempt = 0; attempt < max_attempts; attempt++) {
         // SIM status
-        sim7600_send_command("AT+CPIN?");
-        if (sim7600_read_response(response, sizeof(response), 3000) > 0 &&
-            strstr(response, "+CPIN: READY")) {
+        resp = send_at_command("AT+CPIN?", 3000);
+        if (resp && strstr(resp, "+CPIN: READY")) {
             sim_ready = true;
         } else {
             ESP_LOGW(TAG, "[%02d] SIM not ready", attempt + 1);
         }
 
         // Signal strength
-        sim7600_send_command("AT+CSQ");
-        if (sim7600_read_response(response, sizeof(response), 3000) > 0) {
-            char *csq_ptr = strstr(response, "+CSQ:");
+        resp = send_at_command("AT+CSQ", 5000);
+        if (resp) {
+            char *csq_ptr = strstr(resp, "+CSQ:");
             if (csq_ptr) {
                 int rssi_val = 0;
                 if (sscanf(csq_ptr, "+CSQ: %d", &rssi_val) == 1) {
                     rssi = rssi_val;
                     ESP_LOGI(TAG, "[%02d] RSSI: %d", attempt + 1, rssi);
-                    if (rssi != 99) {
-                        signal_ok = true;
-                    } else {
-                        signal_ok = false;
-                    }
+                    signal_ok = (rssi != 99);
                 } else {
                     ESP_LOGW(TAG, "[%02d] Failed to parse RSSI", attempt + 1);
                 }
@@ -212,13 +233,14 @@ bool sim7600_wait_for_ip(int timeout_ms) {
     const int interval_ms = 2000;
 
     while ((xTaskGetTickCount() - start_time) * portTICK_PERIOD_MS < timeout_ms) {
-        resp = send_at_command("AT+CGPADDR=1", 3000);
+        resp = send_at_command("AT+CGPADDR=1", 20000);
         if (resp) {
             char *ptr = strstr(resp, "+CGPADDR: 1,");
             if (ptr) {
                 ptr += strlen("+CGPADDR: 1,");
-                const char *end = strchr(ptr, '\r');
-                if (end && end > ptr && (end - ptr) < sizeof(ip)) {
+                const char *end = strchr(ptr, '\n');
+                if (!end) end = strchr(ptr, '\0');
+                if (end && (end - ptr) < sizeof(ip)) {
                     strncpy(ip, ptr, end - ptr);
                     ip[end - ptr] = '\0';
 
@@ -243,11 +265,12 @@ bool sim7600_wait_for_ip(int timeout_ms) {
 
 
 
+
 bool sim7600_network_init(void) {
     const char *resp;
 
     //Check network registration
-    int creg_attempts = 30;
+    int creg_attempts = 80;
 
     ESP_LOGI(TAG, "Checking network registration status...");
 
@@ -277,9 +300,9 @@ bool sim7600_network_init(void) {
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     
-    send_at_command("AT+CMEE=2", 1000);
-    send_at_command("AT+CGATT=1", 5000);
-    send_at_command("AT+CGMR", 5000);
+    send_at_command("AT+CMEE=2", 3000);
+    send_at_command("AT+CGATT=1", 20000);
+    send_at_command("AT+CGMR", 1000);
 
  
 
@@ -292,12 +315,12 @@ bool sim7600_network_init(void) {
     snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
     resp = send_at_command(cmd, 5000);
     
-    send_at_command("AT+CGACT=1,1", 8000);
+    send_at_command("AT+CGACT=1,1", 20000);
 
-    send_at_command("AT+CGPADDR=1", 3000);
+    send_at_command("AT+CGPADDR=1", 20000);
 
 
-    if (!sim7600_wait_for_ip(90)) {
+    if (!sim7600_wait_for_ip(60000)) {
         ESP_LOGE(TAG, "IP Assign failed");
         return false;
     }
@@ -330,7 +353,7 @@ bool sim7600_network_init(void) {
 
         ESP_LOGI(TAG, "🆔 Acquiring client...");
         snprintf(cmd, sizeof(cmd), "AT+CMQTTACCQ=0,\"%s\"", client_id);
-        resp = send_at_command(cmd, 3000);
+        resp = send_at_command(cmd, 5000);
         if (!resp || !strstr(resp, "OK")) {
             ESP_LOGE(TAG, "❌ Client acquisition failed");
             return false;
@@ -339,26 +362,37 @@ bool sim7600_network_init(void) {
         vTaskDelay(pdMS_TO_TICKS(300));
         
         
-        send_at_command("AT+CGMR", 10000);
+        //send_at_command("AT+CGMR");
         
         ESP_LOGI(TAG, "🌐 Connecting to broker %s:%d...", broker, port);
         snprintf(cmd, sizeof(cmd), "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",60,1,\"%s\",\"%s\"", broker, port, user, pass);
-        resp = send_at_command(cmd, 10000);
+        resp = send_at_command(cmd,5000);
         if (!resp || !strstr(resp, "OK")) {
             ESP_LOGE(TAG, "❌ MQTT connect failed");
             return false;
         }
-
+        //ESP_LOGI(TAG, "%s", resp);
         ESP_LOGI(TAG, "✅ MQTT connected to ThingsBoard");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
 
+
+        if (!MODEM_LOCK(3000)) {
+        ESP_LOGW(TAG, "❌ Could not lock modem for MQTT publish");
+        
+        }
         //Subscribe to telemetry attributes
         sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+
         sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
 
-        //Publish stored attributes
-        publish_stored_attributes();
+        //request latest shared attributes on boot v1/devices/me/attributes/request/1
+        
 
+        MODEM_UNLOCK();
 
+        
         xEventGroupSetBits(systemEvents, MQTT_INIT);
 
         lvgl_lock(LVGL_LOCK_WAIT_TIME);
@@ -374,31 +408,47 @@ bool sim7600_network_init(void) {
 
     //Subscribe
     bool sim7600_mqtt_subscribe(const char *topic, int qos) {
-        char cmd[64];
-        const char *resp;
-        int topic_len = strlen(topic);
+    char cmd[64];
+    const char *resp;
+    int topic_len = strlen(topic);
 
-        ESP_LOGI(TAG, "🔔 Subscribing to topic: %s", topic);
+    ESP_LOGI(TAG, "🔔 Subscribing to topic: %s (len=%d)", topic, topic_len);
 
-        snprintf(cmd, sizeof(cmd), "AT+CMQTTSUBTOPIC=0,%d,%d", topic_len, qos);
-        resp = send_at_command(cmd, 3000);
-        if (!resp || !strstr(resp, ">")) {
-            ESP_LOGE(TAG, "❌ Failed to set subscribe topic");
-            return false;
-        }
+    snprintf(cmd, sizeof(cmd), "AT+CMQTTSUBTOPIC=0,%d,%d", topic_len, qos);
+    resp = send_at_command(cmd, 5000);
 
-        uart_write_bytes(SIM7600_UART_PORT, topic, topic_len);
-        vTaskDelay(pdMS_TO_TICKS(300));
-
-        resp = send_at_command("AT+CMQTTSUB=0", 5000);
-        if (!resp || !strstr(resp, "OK")) {
-            ESP_LOGE(TAG, "❌ Subscribe command failed");
-            return false;
-        }
-
-        ESP_LOGI(TAG, "✅ Subscribed to topic");
-        return true;
+    if (!resp) {
+        ESP_LOGE(TAG, "❌ No response from CMQTTSUBTOPIC");
+        return false;
     }
+
+    if (strstr(resp, "ERROR")) {
+        ESP_LOGE(TAG, "❌ CMQTTSUBTOPIC returned ERROR: %s", resp);
+        return false;
+    }
+
+    // Some firmwares don't show '>' but immediately expect topic data
+    if (!strstr(resp, ">") && !strstr(resp, "OK")) {
+        ESP_LOGW(TAG, "⚠️ Unexpected CMQTTSUBTOPIC response: %s", resp);
+        return false;
+    }
+
+    // Send topic if '>' prompt expected
+    if (strstr(resp, ">")) {
+        uart_write_bytes(SIM7600_UART_PORT, topic, topic_len);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    resp = send_at_command("AT+CMQTTSUB=0", 5000);
+    if (!resp || !strstr(resp, "OK")) {
+        ESP_LOGE(TAG, "❌ Subscribe command failed: %s", resp ? resp : "NULL");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "✅ Subscribed to topic");
+    return true;
+}
+
 
     //Publish Function
     bool sim7600_mqtt_publish(const char *topic, const char *payload) {
@@ -407,7 +457,7 @@ bool sim7600_network_init(void) {
 
         // Step 1: Set topic
         snprintf(cmd, sizeof(cmd), "AT+CMQTTTOPIC=0,%d", strlen(topic));
-        resp = send_at_command(cmd, 2000);
+        resp = send_at_command(cmd, 5000);
         if (!resp || !strstr(resp, ">")) {
             ESP_LOGE(TAG, "❌ Failed to set topic");
             return false;
@@ -417,7 +467,7 @@ bool sim7600_network_init(void) {
 
         // Step 2: Set payload
         snprintf(cmd, sizeof(cmd), "AT+CMQTTPAYLOAD=0,%d", strlen(payload));
-        resp = send_at_command(cmd, 2000);
+        resp = send_at_command(cmd, 5000);
         if (!resp || !strstr(resp, ">")) {
             ESP_LOGE(TAG, "❌ Failed to set payload");
             return false;
@@ -426,7 +476,7 @@ bool sim7600_network_init(void) {
         vTaskDelay(pdMS_TO_TICKS(100));
 
         // Step 3: Publish
-        resp = send_at_command("AT+CMQTTPUB=0,1,60", 5000);
+        resp = send_at_command("AT+CMQTTPUB=0,1,60", 10000);
         if (resp && strstr(resp, "OK")) {
             ESP_LOGI(TAG, "✅ Published to topic: %s", topic);
             return true;
@@ -445,7 +495,7 @@ bool sim7600_network_init(void) {
             return;
         }
 
-        const char *resp = send_at_command("AT+CSQ", 3000);
+        const char *resp = send_at_command("AT+CSQ", 5000);
         vTaskDelay(10 / portTICK_PERIOD_MS); // Allow time for response to be processed
         MODEM_UNLOCK();
 
@@ -510,46 +560,92 @@ void modem_task(void *param) {
 
 // Task: reads UART events, dispatches attribute URCs and AT responses
 void monitor_task(void *arg) {
-    at_resp_queue = xQueueCreate(AT_RESP_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
-
-    uart_event_t event;
-    uint8_t data[UART_BUF_SIZE];
+    uint8_t data[256];
     char line[SIM7600_UART_BUF_SIZE];
-    size_t idx = 0;
+    size_t line_idx = 0;
+
+    bool in_rpc_block = false;  // Track if inside +CMQTTRXSTART -> +CMQTTRXEND block
 
     ESP_LOGI(TAG, "Monitor task started");
+
     while (1) {
-        // Wait for UART event
-        if (xQueueReceive(uart_queue, &event, portMAX_DELAY)) {
-            if (event.type == UART_DATA) {
-                int len = uart_read_bytes(SIM7600_UART_PORT, data, event.size, portMAX_DELAY);
-                for (int i = 0; i < len; i++) {
-                    char c = (char)data[i];
-                    if (c == '\r') continue;
-                    if (c == '\n' || idx >= SIM7600_UART_BUF_SIZE - 1) {
-                        line[idx] = '\0';
-                        if (idx > 0) {
-                            //SP_LOGI(TAG, "Line: %s", line);
-                            // If it's an attribute update URC
-                            if (strstr(line, "+QMTRECV:") ) {
-                                mqtt_handle_urc(line);
-                            } else {
-                                // Otherwise treat as AT response
-                                xQueueSend(at_resp_queue, &line, 0);
-                                //ESP_LOGW(TAG, "sent into queue");
+        int len = uart_read_bytes(SIM7600_UART_PORT, data, sizeof(data), pdMS_TO_TICKS(20));
+        if (len > 0) {
+            for (int i = 0; i < len; i++) {
+                char c = (char)data[i];
+                if (c == '\r') continue;  // skip carriage returns
+
+                // Special handling for '>' prompt
+                if (c == '>') {
+                    // Flush any accumulated line before the '>'
+                    if (line_idx > 0) {
+                        line[line_idx] = '\0';
+                        //ESP_LOGI(TAG, "LINE << %s", line);  // Log every completed line
+
+                        if (!in_rpc_block &&
+                            (strstr(line, "+QMTRECV:") || strstr(line, "RDY") ||
+                             strstr(line, "SMS DONE") || strstr(line, "PB DONE"))) {
+                            mqtt_handle_urc(line);
+                        } else if (!in_rpc_block) {
+                            if (xQueueSend(at_resp_queue, line, 0) != pdTRUE) {
+                                ESP_LOGW(TAG, "at_resp_queue full, dropping line: %s", line);
                             }
                         }
-                        idx = 0;
-                    } else {
-                        line[idx++] = c;
+                        line_idx = 0;
                     }
+
+                    // Push the standalone '>'
+                    if (!in_rpc_block) {
+                        line[0] = '>';
+                        line[1] = '\0';
+                        //ESP_LOGI(TAG, "LINE << >");  // Log standalone prompt
+                        if (xQueueSend(at_resp_queue, line, 0) != pdTRUE) {
+                            ESP_LOGW(TAG, "at_resp_queue full, dropping prompt: >");
+                        }
+                    }
+                    continue;
                 }
-            } else if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL) {
-                uart_flush_input(SIM7600_UART_PORT);
-                xQueueReset(uart_queue);
-                idx = 0;
-                ESP_LOGW(TAG, "UART overflow");
+
+                // End of line
+                if (c == '\n' || line_idx >= SIM7600_UART_BUF_SIZE - 1) {
+                    line[line_idx] = '\0';
+
+                    if (line_idx > 0) {
+                        //ESP_LOGI(TAG, "LINE << %s", line);  // Log every completed line
+
+                        // Handle the start of an RPC block
+                        if (strstr(line, "+CMQTTRXSTART:")) {
+                            in_rpc_block = true;
+                            mqtt_handle_urc(line);
+                        }
+                        // Handle the end of an RPC block
+                        else if (strstr(line, "+CMQTTRXEND:")) {
+                            mqtt_handle_urc(line);
+                            in_rpc_block = false;
+                        }
+                        // Lines inside RPC block
+                        else if (in_rpc_block) {
+                            mqtt_handle_urc(line);
+                        }
+                        // Regular URCs outside RPC blocks
+                        else if (strstr(line, "+QMTRECV:") || strstr(line, "RDY") ||
+                                 strstr(line, "SMS DONE") || strstr(line, "PB DONE")) {
+                            mqtt_handle_urc(line);
+                        }
+                        // AT response line
+                        else {
+                            if (xQueueSend(at_resp_queue, line, 0) != pdTRUE) {
+                                ESP_LOGW(TAG, "at_resp_queue full, dropping line: %s", line);
+                            }
+                        }
+                    }
+                    line_idx = 0;
+                } else {
+                    line[line_idx++] = c;
+                }
             }
         }
     }
 }
+
+

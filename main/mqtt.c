@@ -1,3 +1,4 @@
+#include "esp_log.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
@@ -42,66 +43,127 @@ static void send_rpc_response(const char *req_id, cJSON *result);
 
 // Entry point: called from URC handler when +QMTRECV lines arrive
 void mqtt_handle_urc(const char *urc) {
-    if (strstr(urc, "+QMTRECV:")) {
-        const char *p_topic = strchr(urc, '"');
-        if (!p_topic) return;
-        p_topic++;
-        const char *p_topic_end = strchr(p_topic, '"');
-        if (!p_topic_end) return;
-        size_t topic_len = p_topic_end - p_topic;
-        char topic[64] = {0};
-        memcpy(topic, p_topic, topic_len);
+    static bool in_mqtt_block = false;
+    static char current_topic[128] = {0};
+    static char current_payload[512] = {0};
 
-        const char *p_json = strchr(p_topic_end + 1, '{');
-        if (!p_json) return;
+    ESP_LOGI(TAG, "Received URC: %s", urc);
 
-        if (strcmp(topic, TOPIC_ATTR_UPDATES) == 0) {
-            handle_shared_attributes(p_json);
-        } else if (strncmp(topic, TOPIC_RPC_REQUEST_BASE, strlen(TOPIC_RPC_REQUEST_BASE)) == 0) {
-            handle_rpc_request(topic, p_json);
+    // Start of MQTT RX block
+    if (strstr(urc, "+CMQTTRXSTART:")) {
+        in_mqtt_block = true;
+        current_topic[0] = '\0';
+        current_payload[0] = '\0';
+        return;
+    }
+
+    // Topic line (actual topic follows +CMQTTRXTOPIC)
+    if (in_mqtt_block && strstr(urc, "+CMQTTRXTOPIC:")) {
+        // Next line will contain the topic
+        return;
+    }
+
+    // Payload line (after +CMQTTRXPAYLOAD)
+    if (in_mqtt_block && strstr(urc, "+CMQTTRXPAYLOAD:")) {
+        // Next line will contain JSON payload
+        return;
+    }
+
+    // End of MQTT RX block
+    if (strstr(urc, "+CMQTTRXEND:")) {
+        in_mqtt_block = false;
+
+        // Classify and dispatch
+        if (strlen(current_topic) > 0 && strlen(current_payload) > 0) {
+            if (strcmp(current_topic, TOPIC_ATTR_UPDATES) == 0) {
+                handle_shared_attributes(current_payload);
+            } else if (strncmp(current_topic, TOPIC_RPC_REQUEST_BASE,
+                               strlen(TOPIC_RPC_REQUEST_BASE)) == 0) {
+                handle_rpc_request(current_topic, current_payload);
+            } else {
+                ESP_LOGW(TAG, "Unhandled topic: %s with payload: %s",
+                         current_topic, current_payload);
+            }
+        }
+        return;
+    }
+
+    // If we're inside a message block but this line is not a header, it's data
+    if (in_mqtt_block) {
+        if (current_topic[0] == '\0') {
+            // First data line after +CMQTTRXTOPIC is the topic
+            strncpy(current_topic, urc, sizeof(current_topic) - 1);
+        } else if (current_payload[0] == '\0' && strchr(urc, '{')) {
+            // First line containing '{' after +CMQTTRXPAYLOAD is payload
+            strncpy(current_payload, urc, sizeof(current_payload) - 1);
         }
     }
 }
 
+
 // Parse shared attributes JSON and store floats (2dp) in NVS
 static void handle_shared_attributes(const char *json) {
+    ESP_LOGI(TAG, "Handling shared attributes: %s", json);
+
     cJSON *root = cJSON_Parse(json);
-    if (!root) return;
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse shared attributes JSON");
+        return;
+    }
 
     nvs_handle_t h;
     if (nvs_open(NS_ATTR, NVS_READWRITE, &h) == ESP_OK) {
         cJSON *item;
         float val;
 
+        // AUX_RANGE
         item = cJSON_GetObjectItem(root, KEY_AUX_RANGE);
         if (cJSON_IsNumber(item)) {
             val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_RANGE = %.2f", val);
             nvs_set_blob(h, KEY_AUX_RANGE, &val, sizeof(val));
+        } else {
+            ESP_LOGI(TAG, "KEY_AUX_RANGE not found in JSON");
         }
 
+        // AUX_MAX
         item = cJSON_GetObjectItem(root, KEY_AUX_MAX);
         if (cJSON_IsNumber(item)) {
             val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_MAX = %.2f", val);
             nvs_set_blob(h, KEY_AUX_MAX, &val, sizeof(val));
+        } else {
+            ESP_LOGI(TAG, "KEY_AUX_MAX not found in JSON");
         }
 
+        // EXT_RANGE
         item = cJSON_GetObjectItem(root, KEY_EXT_RANGE);
         if (cJSON_IsNumber(item)) {
             val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_RANGE = %.2f", val);
             nvs_set_blob(h, KEY_EXT_RANGE, &val, sizeof(val));
+        } else {
+            ESP_LOGI(TAG, "KEY_EXT_RANGE not found in JSON");
         }
 
+        // EXT_MAX
         item = cJSON_GetObjectItem(root, KEY_EXT_MAX);
         if (cJSON_IsNumber(item)) {
             val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_MAX = %.2f", val);
             nvs_set_blob(h, KEY_EXT_MAX, &val, sizeof(val));
+        } else {
+            ESP_LOGI(TAG, "KEY_EXT_MAX not found in JSON");
         }
 
         nvs_commit(h);
         nvs_close(h);
+    } else {
+        ESP_LOGW(TAG, "Failed to open NVS namespace: %s", NS_ATTR);
     }
     cJSON_Delete(root);
 }
+
 
 // Handle RPC calls (button controls) without NVS persistence
 static void handle_rpc_request(const char *topic, const char *json) {
@@ -139,7 +201,7 @@ static void send_rpc_response(const char *req_id, cJSON *result) {
     char buf[256];
     snprintf(buf, sizeof(buf), "AT+QMTPUB=%d,0,1,\"%s\",%s",
              MQTT_CLIENT_IDX, topic, payload);
-    send_at_command(buf,1000);
+    send_at_command(buf, 5000);
     free(payload);
 }
 
@@ -159,19 +221,28 @@ void publish_stored_attributes(void) {
         nvs_get_blob(h, KEY_EXT_MAX,   &extMax,   &size);
         nvs_close(h);
     }
-    // Format JSON
-    char payload[128];
-    snprintf(payload, sizeof(payload),
-             "{\"%s\":%.2f,\"%s\":%.2f,\"%s\":%.2f,\"%s\":%.2f}",
-             KEY_AUX_RANGE, auxRange,
-             KEY_AUX_MAX,   auxMax,
-             KEY_EXT_RANGE, extRange,
-             KEY_EXT_MAX,   extMax);
+   
+
+    // Create a cJSON object
+    cJSON *attr = cJSON_CreateObject();
+    if (attr == NULL) {
+    ESP_LOGE(TAG, "Failed to create cJSON object");
+    return;
+    }
+
+    cJSON_AddNumberToObject(attr, KEY_AUX_MAX, auxMax);
+    cJSON_AddNumberToObject(attr, KEY_AUX_RANGE, auxRange);
+    cJSON_AddNumberToObject(attr, KEY_EXT_MAX, extMax);
+    cJSON_AddNumberToObject(attr, KEY_EXT_RANGE, extRange);
+
+    char *json_string = cJSON_PrintUnformatted(attr);
+
 
     // Use helper to publish
-    if (!sim7600_mqtt_publish(TOPIC_ATTR_UPDATES, payload)) {
+    if (!sim7600_mqtt_publish(TOPIC_ATTR_UPDATES, json_string)) {
         ESP_LOGE(TAG, "Failed to publish stored attributes");
     }
+
 }
 
 

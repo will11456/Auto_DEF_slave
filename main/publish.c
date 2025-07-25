@@ -29,11 +29,13 @@ void publish_data(void) {
 //Task thread
 void publish_task(void *pvParameter){
 
+    publish_trigger = xSemaphoreCreateBinary();  // Create the publish trigger semaphore
+    
     xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGW(TAG, "publish task active");
 
     
-    publish_trigger = xSemaphoreCreateBinary();  // Create the publish trigger semaphore
+    
 
     const TickType_t publish_interval = 60000 * MQTT_PUBLISH_FREQ / portTICK_PERIOD_MS; //timeout for publishing data
 

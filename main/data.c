@@ -161,25 +161,25 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     esp_err_t err = mqtt_get_aux_range(&auxRange);
     if (err != ESP_OK) {
         //ESP_LOGE(TAG, "Failed to get aux range from NVS: %s", esp_err_to_name(err));
-        auxRange = 0.0f; // Default value if read fails
+        auxRange = 1.0f; // Default value if read fails
     }
 
     err = mqtt_get_ext_range(&extRange);
     if (err != ESP_OK) {
         //ESP_LOGE(TAG, "Failed to get ext range from NVS: %s", esp_err_to_name(err));
-        extRange = 0.0f; // Default value if read fails
+        extRange = 1.0f; // Default value if read fails
     }
 
     err = mqtt_get_aux_max(&auxMax);
     if (err != ESP_OK) {
         //ESP_LOGE(TAG, "Failed to get aux max from NVS: %s", esp_err_to_name(err));
-        auxMax = 0.0f; // Default value if read fails
+        auxMax = 1.0f; // Default value if read fails
     }   
 
     err = mqtt_get_ext_max(&extMax);
     if (err != ESP_OK) {
         //ESP_LOGE(TAG, "Failed to get ext max from NVS: %s", esp_err_to_name(err));
-        extMax = 0.0f; // Default value if read fails
+        extMax = 1.0f; // Default value if read fails
     }
     
     char int_buf[32];
