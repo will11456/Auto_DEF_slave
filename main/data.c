@@ -189,8 +189,12 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     //ESP_LOGI(TAG, "ext_tank_ma: %d, aux_tank_ma: %d", ext_tank_ma, aux_tank_ma);
 
     
-    int16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * 1000 * extRange) / 1600)  /  1000 * extMax) * 100.0;
-    int16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * 1000 * auxRange) / 1600)  /  1000 * auxMax) * 100.0;
+    int16_t ext_tank_percent = ((float)((float)((ext_tank_ma - 400.0) * 1000 * extRange) / 1600)  /  (1000 * extMax)) * 100.0;
+    int16_t aux_tank_percent = ((float)((float)((aux_tank_ma - 400.0) * 1000 * auxRange) / 1600)  /  (1000 * auxMax)) * 100.0;
+
+    //ESP_LOGI(TAG, "ext_tank_ma: %d, extRange: %f, extMax: %f, ext_tank_percent: %d", ext_tank_ma, extRange, extMax,ext_tank_percent);
+    //ESP_LOGI(TAG, "aux_tank_ma: %d, auxRange: %f, auxMax: %f, aux_tank_percent: %d", aux_tank_ma, auxRange, auxMax, aux_tank_percent);
+
 
     if (ext_tank_percent > 100){
         ext_tank_percent = -1;
@@ -302,7 +306,7 @@ void handle_mode_message(const DecodedMessage *decoded_msg){
         xSemaphoreGive(data_mutex);
     }
     
-    publish_data(); // Publish the mode change to MQTT
+    //publish_data(); // Publish the mode change to MQTT
 
 }
 

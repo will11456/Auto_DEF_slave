@@ -22,8 +22,18 @@ extern "C" {
 
 #define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
 
+#define SIM7600_UART_PORT UART_NUM_2
+#define SIM7600_UART_BUF_SIZE 512 //4096
+#define SIM7600_BAUD_RATE 115200
+
+#define EVENT_QUEUE_LEN    10
+#define AT_RESP_QUEUE_LEN  20
+
 extern SemaphoreHandle_t at_mutex;
+extern SemaphoreHandle_t publish_mutex;           // Mutex to protect AT command access
 extern SemaphoreHandle_t publish_trigger; // Semaphore to trigger
+
+
 
 //Mutex to protect UART access
 #define MODEM_LOCK(timeout_ms) \

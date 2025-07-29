@@ -68,4 +68,13 @@ typedef enum {                  //goes in system data0
 } system_messages_t;
 
 
+
+//Comms button messages
+typedef enum {
+    RUN = 0,
+    STOP,
+    RESET,
+} button_messages_t;
+
+
 #endif // MESSAGE_IDS_H

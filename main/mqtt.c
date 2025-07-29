@@ -34,12 +34,6 @@ static const char *TAG = "MQTT";
 
 
 
-// Forward declarations
-static void handle_shared_attributes(const char *json);
-static void handle_rpc_request(const char *topic, const char *json);
-static void send_rpc_response(const char *req_id, cJSON *result);
-
-
 
 // Entry point: called from URC handler when +QMTRECV lines arrive
 void mqtt_handle_urc(const char *urc) {
@@ -102,7 +96,7 @@ void mqtt_handle_urc(const char *urc) {
 
 
 // Parse shared attributes JSON and store floats (2dp) in NVS
-static void handle_shared_attributes(const char *json) {
+void handle_shared_attributes(const char *json) {
     ESP_LOGI(TAG, "Handling shared attributes: %s", json);
 
     cJSON *root = cJSON_Parse(json);
@@ -166,42 +160,60 @@ static void handle_shared_attributes(const char *json) {
 
 
 // Handle RPC calls (button controls) without NVS persistence
-static void handle_rpc_request(const char *topic, const char *json) {
+void handle_rpc_request(const char *topic, const char *json) {
     const char *req_id = strrchr(topic, '/');
     if (!req_id) return;
     req_id++;
 
-    cJSON *root   = cJSON_Parse(json);
+    cJSON *root = cJSON_Parse(json);
     if (!root) return;
     cJSON *method = cJSON_GetObjectItem(root, "method");
     cJSON *params = cJSON_GetObjectItem(root, "params");
 
     cJSON *result = cJSON_CreateObject();
+    bool success = false;
 
     if (cJSON_IsString(method)) {
-        // Dispatch to user-defined action
-        //control_action(method->valuestring, params);
-        cJSON_AddBoolToObject(result, "success", true);
+        const char *method_str = method->valuestring;
+        ESP_LOGI("RPC", "Received method: %s", method_str);
+
+        if (strcmp(method_str, "Run") == 0) {
+            // Handle "run"
+            ESP_LOGI("RPC", "Handling RUN command");
+            handle_run();
+            success = true;
+
+        } else if (strcmp(method_str, "Stop") == 0) {
+            // Handle "stop"
+            ESP_LOGI("RPC", "Handling STOP command");
+            handle_stop();
+            success = true;
+
+        } else {
+            ESP_LOGW("RPC", "Unknown RPC method: %s", method_str);
+            cJSON_AddStringToObject(result, "error", "unknown method");
+        }
     } else {
-        cJSON_AddBoolToObject(result, "success", false);
-        cJSON_AddStringToObject(result, "error", "invalid method");
+        cJSON_AddStringToObject(result, "error", "invalid or missing method");
     }
 
+    cJSON_AddBoolToObject(result, "success", success);
     send_rpc_response(req_id, result);
+
+    
     cJSON_Delete(result);
     cJSON_Delete(root);
 }
 
+
 // Publish RPC response
-static void send_rpc_response(const char *req_id, cJSON *result) {
+void send_rpc_response(const char *req_id, cJSON *result) {
     char topic[64];
     char *payload = cJSON_PrintUnformatted(result);
     snprintf(topic, sizeof(topic), "v1/devices/me/rpc/response/%s", req_id);
-
-    char buf[256];
-    snprintf(buf, sizeof(buf), "AT+QMTPUB=%d,0,1,\"%s\",%s",
-             MQTT_CLIENT_IDX, topic, payload);
-    send_at_command(buf, 5000);
+    
+    sim7600_mqtt_publish(topic, payload);
+    
     free(payload);
 }
 
@@ -285,4 +297,31 @@ esp_err_t mqtt_get_ext_max(float *out_val) {
     err = nvs_get_blob(h, KEY_EXT_MAX, out_val, &required_size);
     nvs_close(h);
     return err;
+}
+
+
+
+void handle_run(void) {
+    ESP_LOGW(TAG, "Run command received");
+}
+
+void handle_stop(void) {
+    ESP_LOGW(TAG, "Stop command received");
+}
+
+
+
+
+
+void mqtt_urc_task(void *param) {
+    char line[SIM7600_UART_BUF_SIZE];
+
+    ESP_LOGI("MQTT_URC", "MQTT URC task started");
+
+    while (1) {
+        // Block until a line is received from the queue
+        if (xQueueReceive(incoming_queue, &line, portMAX_DELAY) == pdTRUE) {
+            mqtt_handle_urc(line);
+        }
+    }
 }

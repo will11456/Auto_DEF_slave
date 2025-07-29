@@ -105,6 +105,7 @@ void publish_task(void *pvParameter){
         if (json_string == NULL) {
         ESP_LOGE(TAG, "Failed to print JSON string");
         cJSON_Delete(root);
+        continue;
         
         }
 
@@ -112,15 +113,8 @@ void publish_task(void *pvParameter){
         xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
         
 
-        //use mutex to protect AT commands
-        if (!MODEM_LOCK(3000)) {
-        ESP_LOGW(TAG, "❌ Could not lock modem for MQTT publish");
-        
-        }
-
         sim7600_mqtt_publish(MQTT_TOPIC_PUB, json_string);
-        MODEM_UNLOCK();
-
+            
         ESP_LOGW(TAG, "published data!");
         cJSON_Delete(root);
         free(json_string);
