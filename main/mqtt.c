@@ -8,6 +8,7 @@
 #include "mqtt.h"
 #include "gnss.h"
 #include "main.h"
+#include "message_ids.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -189,6 +190,12 @@ void handle_rpc_request(const char *topic, const char *json) {
             handle_stop();
             success = true;
 
+        } else if (strcmp(method_str, "Reboot") == 0) {
+            // Handle "stop"
+            ESP_LOGI("RPC", "Handling STOP command");
+            handle_reboot();
+            success = true;
+
         } else {
             ESP_LOGW("RPC", "Unknown RPC method: %s", method_str);
             cJSON_AddStringToObject(result, "error", "unknown method");
@@ -198,7 +205,7 @@ void handle_rpc_request(const char *topic, const char *json) {
     }
 
     cJSON_AddBoolToObject(result, "success", success);
-    send_rpc_response(req_id, result);
+    //send_rpc_response(req_id, result);
 
     
     cJSON_Delete(result);
@@ -299,17 +306,55 @@ esp_err_t mqtt_get_ext_max(float *out_val) {
     return err;
 }
 
+///////////////message sending//////////////
+void int_to_hex_str(unsigned int num, char *str, int str_size) {
+    snprintf(str, str_size, "%04X", num);
+}
+
+void send_message(int message_id, int message_type, uint16_t data0, uint16_t data1, uint16_t data2, uint16_t data3) {
+    // Temporary buffers
+    char output_buffer[23];  // 1 byte for type + 4 bytes for each data field + null terminator
+    char message_id_str[5];  // 4 characters for 2 bytes in hex + null terminator
+    char data_type = message_type ? '1' : '0';
+
+    // Convert the message ID to a hex string
+    int_to_hex_str(message_id, message_id_str, sizeof(message_id_str));
+
+    // Format the message
+    snprintf(output_buffer, 23, "%c%s#%04X%04X%04X%04X",
+             data_type, message_id_str,
+             data0, data1, data2, data3);
+
+    if (xQueueSend(master_cmd_queue, output_buffer, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE("UART_SEND", "Failed to send message to queue");
+    }
+}
+
+
+
+
+
+
 
 
 void handle_run(void) {
     ESP_LOGW(TAG, "Run command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, RUN , 0, 0, 0);
+    ESP_LOGI(TAG, "Run command sent to master");
 }
 
 void handle_stop(void) {
     ESP_LOGW(TAG, "Stop command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, STOP , 0, 0, 0);
+    ESP_LOGI(TAG, "Stop command sent to master");
 }
 
 
+void handle_reboot(void) {
+    ESP_LOGW(TAG, "Reboot command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, RESET , 0, 0, 0);
+    ESP_LOGI(TAG, "Reboot command sent to master");
+}
 
 
 

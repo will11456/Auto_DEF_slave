@@ -415,10 +415,10 @@ bool sim7600_network_init(void) {
         
         //Subscribe to telemetry attributes
         sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
 
         sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
 
         //request latest shared attributes on boot v1/devices/me/attributes/request/1
         
@@ -526,7 +526,7 @@ bool sim7600_network_init(void) {
         resp = send_at_command("AT+CMQTTPUB=0,1,60", 10000);
         if (resp && strstr(resp, "OK")) {
             ESP_LOGI(TAG, "✅ Published %s to topic: %s", payload, topic);
-            vTaskDelay(10 / portTICK_PERIOD_MS); // Allow time for publish to complete
+            vTaskDelay(200 / portTICK_PERIOD_MS); // Allow time for publish to complete
             xSemaphoreGive(publish_mutex);
             return true;
         } else {

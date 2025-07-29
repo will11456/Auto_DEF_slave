@@ -21,6 +21,7 @@
 #include "cJSON.h"
 
 extern QueueHandle_t incoming_queue;
+extern QueueHandle_t master_cmd_queue; 
 
 
 // Handle incoming MQTT URC (to be called from your URC handler)
@@ -32,6 +33,10 @@ void handle_rpc_request(const char *topic, const char *json);
 
 void handle_run(void);
 void handle_stop(void);
+void handle_reboot(void);
+
+void int_to_hex_str(unsigned int num, char *str, int str_size);
+void send_message(int message_id, int message_type, uint16_t data0, uint16_t data1, uint16_t data2, uint16_t data3);
 
 void mqtt_urc_task(void *param);
 

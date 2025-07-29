@@ -82,7 +82,9 @@ void app_main(void)
 
     // Start Tasks
     xTaskCreatePinnedToCore(run_display_task, "display", 2048*12, NULL, 3, &displayTaskHandle, 0);
-    xTaskCreatePinnedToCore(uart_task, "uart_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
+    xTaskCreatePinnedToCore(master_rx_task, "master_rx_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
+    xTaskCreatePinnedToCore(master_tx_task, "master_tx_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
+
     xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
     xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*12, NULL, 1, NULL, 1);
 

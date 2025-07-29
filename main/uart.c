@@ -15,6 +15,8 @@
 static const char *TAG = "UART";
 
 TaskHandle_t heartbeatTaskHandle = NULL;
+QueueHandle_t master_cmd_queue; // Queue for commands to be sent over UART
+
 
 // Function to initialize UART
 void uart_init() {
@@ -33,11 +35,11 @@ void uart_init() {
 }
 
 // Task function to read and display UART messages
-void uart_task(void *param) {
+void master_rx_task(void *param) {
     
     
     // Create the message queue
-     message_queue = xQueueCreate(MESSAGE_QUEUE_SIZE, sizeof(DecodedMessage));
+    message_queue = xQueueCreate(MESSAGE_QUEUE_SIZE, sizeof(DecodedMessage));
     if (message_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create message queue");
         return;
@@ -79,6 +81,21 @@ void uart_task(void *param) {
             } else {
                 ESP_LOGE(TAG, "Failed to send message to queue");
             }
+        }
+    }
+}
+
+
+void master_tx_task(void *param){
+    char message[MASTER_MSG_SIZE];
+    master_cmd_queue = xQueueCreate(MESSAGE_QUEUE_SIZE, MASTER_MSG_SIZE);
+
+    while (1) {
+        if (xQueueReceive(master_cmd_queue, &message, portMAX_DELAY) == pdTRUE) {
+            ESP_LOGI("MASTER_TX", "Sending command: %s", message);
+            uart_write_bytes(UART_NUM, message, strlen(message));
+            uart_write_bytes(UART_NUM, "\r\n", 2);
+            
         }
     }
 }
