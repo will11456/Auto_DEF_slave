@@ -69,7 +69,7 @@ void master_rx_task(void *param) {
         //ESP_LOGW(TAG, "msg: %u" , len);
         if (len == 22) {
             received_message[len] = '\0';  // Null-terminate the received string
-            //ESP_LOGI(TAG, "Received message: %s", received_message);
+            // ESP_LOGI(TAG, "Received message: %s", received_message);
 
             // Decode the message
             decode_uart_message(received_message, &decoded_msg);
@@ -94,7 +94,7 @@ void master_tx_task(void *param){
         if (xQueueReceive(master_cmd_queue, &message, portMAX_DELAY) == pdTRUE) {
             ESP_LOGI("MASTER_TX", "Sending command: %s", message);
             uart_write_bytes(UART_NUM, message, strlen(message));
-            uart_write_bytes(UART_NUM, "\r\n", 2);
+            //uart_write_bytes(UART_NUM, "\r\n", 2);
             
         }
     }
