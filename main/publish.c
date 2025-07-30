@@ -49,7 +49,7 @@ void publish_task(void *pvParameter){
         sensor_data_t data;
         GNSSLocation gnss_data;
 
-        
+        //Get sensor and GNSS data
         xSemaphoreTake(data_mutex, portMAX_DELAY);  // Lock the mutex before reading shared data
         data = shared_sensor_data;  // Copy the shared sensor data to local variable
         xSemaphoreGive(data_mutex);   // Release the mutex after reading
@@ -57,6 +57,50 @@ void publish_task(void *pvParameter){
         xSemaphoreTake(gnss_mutex, portMAX_DELAY);  // Lock the mutex before reading GNSS data
         gnss_data = shared_gnss_data;  // Copy the GNSS data to local variable
         xSemaphoreGive(gnss_mutex);   // Release the mutex after reading
+
+
+        // Get shared attribute data
+        float auxRange = 0, auxMax = 0, extRange = 0, extMax = 0;
+        int fillTime = 0, purgeTime = 0, sleepTimeout = 0, minDEFLevel = 0;
+
+        nvs_handle_t h;
+        if (nvs_open(NS_ATTR, NVS_READONLY, &h) == ESP_OK) {
+            size_t fsize = sizeof(float);
+
+            // Float values (stored as blobs)
+            if (nvs_get_blob(h, KEY_AUX_RANGE, &auxRange, &fsize) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get AUX_RANGE");
+
+            fsize = sizeof(float);
+            if (nvs_get_blob(h, KEY_AUX_MAX, &auxMax, &fsize) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get AUX_MAX");
+
+            fsize = sizeof(float);
+            if (nvs_get_blob(h, KEY_EXT_RANGE, &extRange, &fsize) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get EXT_RANGE");
+
+            fsize = sizeof(float);
+            if (nvs_get_blob(h, KEY_EXT_MAX, &extMax, &fsize) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get EXT_MAX");
+
+            // Integer values
+            if (nvs_get_i32(h, KEY_FILL_TIME, &fillTime) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get FILL_TIME");
+
+            if (nvs_get_i32(h, KEY_PURGE_TIME, &purgeTime) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get PURGE_TIME");
+
+            if (nvs_get_i32(h, KEY_SLEEP_TIMEOUT, &sleepTimeout) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get SLEEP_TIMEOUT");
+
+            if (nvs_get_i32(h, KEY_MIN_DEF_LEVEL, &minDEFLevel) != ESP_OK)
+                ESP_LOGW(TAG, "Failed to get MIN_DEF_LEVEL");
+
+            nvs_close(h);
+        } else {
+            ESP_LOGE(TAG, "Failed to open NVS namespace: %s", NS_ATTR);
+        }
+
 
 
 
@@ -93,6 +137,17 @@ void publish_task(void *pvParameter){
         cJSON_AddNumberToObject(root, "Lon", gnss_data.longitude);
         cJSON_AddNumberToObject(root, "Alt", gnss_data.altitude);
         cJSON_AddStringToObject(root, "Timestamp", gnss_data.timestamp);
+
+        // Shared attributes
+        cJSON_AddNumberToObject(root, "AuxTankRange", auxRange);
+        cJSON_AddNumberToObject(root, "AuxTankMax", auxMax);
+        cJSON_AddNumberToObject(root, "ExtTankRange", extRange);
+        cJSON_AddNumberToObject(root, "ExtTankMax", extMax);
+
+        cJSON_AddNumberToObject(root, "FillTime", fillTime);
+        cJSON_AddNumberToObject(root, "PurgeTime", purgeTime);
+        cJSON_AddNumberToObject(root, "SleepTimeout", sleepTimeout);
+        cJSON_AddNumberToObject(root, "MinDEFLevel", minDEFLevel);
 
 
 

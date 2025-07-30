@@ -14,6 +14,8 @@
 #define MSG_ID_PT1000           10
 #define MSG_ID_STATUS           11
 #define MSG_ID_SYSTEM           12
+#define MSG_ID_SETTINGS         13
+
 
 //Message types
 typedef enum {

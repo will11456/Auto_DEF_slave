@@ -23,6 +23,18 @@
 extern QueueHandle_t incoming_queue;
 extern QueueHandle_t master_cmd_queue; 
 
+// NVS namespace and attribute keys
+#define NS_ATTR                 "shared_attrs"
+#define KEY_AUX_RANGE           "AuxTankRange"
+#define KEY_AUX_MAX             "AuxTankMax"
+#define KEY_EXT_RANGE           "ExtTankRange"
+#define KEY_EXT_MAX             "ExtTankMax"
+
+#define KEY_FILL_TIME           "FillTime"
+#define KEY_PURGE_TIME          "PurgeTime"
+#define KEY_SLEEP_TIMEOUT       "SleepTimeout"
+#define KEY_MIN_DEF_LEVEL       "MinDEFLevel"
+
 
 // Handle incoming MQTT URC (to be called from your URC handler)
 void mqtt_handle_urc(const char *urc);

@@ -1,4 +1,5 @@
 #include "esp_log.h"
+#include "freertos/idf_additions.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
@@ -9,6 +10,7 @@
 #include "gnss.h"
 #include "main.h"
 #include "message_ids.h"
+#include "publish.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -23,17 +25,9 @@
 #define TOPIC_ATTR_UPDATES      "v1/devices/me/attributes"
 #define TOPIC_RPC_REQUEST_BASE  "v1/devices/me/rpc/request/"
 
-// NVS namespace and attribute keys
-#define NS_ATTR                 "shared_attrs"
-#define KEY_AUX_RANGE           "AuxTankRange"
-#define KEY_AUX_MAX             "AuxTankMax"
-#define KEY_EXT_RANGE           "ExtTankRange"
-#define KEY_EXT_MAX             "ExtTankMax"
+
 
 static const char *TAG = "MQTT";
-
-
-
 
 
 // Entry point: called from URC handler when +QMTRECV lines arrive
@@ -42,7 +36,7 @@ void mqtt_handle_urc(const char *urc) {
     static char current_topic[128] = {0};
     static char current_payload[512] = {0};
 
-    ESP_LOGI(TAG, "Received URC: %s", urc);
+    //ESP_LOGI(TAG, "Received URC: %s", urc);
 
     // Start of MQTT RX block
     if (strstr(urc, "+CMQTTRXSTART:")) {
@@ -109,14 +103,15 @@ void handle_shared_attributes(const char *json) {
     nvs_handle_t h;
     if (nvs_open(NS_ATTR, NVS_READWRITE, &h) == ESP_OK) {
         cJSON *item;
-        float val;
+        float float_val;
+        int int_val;
 
         // AUX_RANGE
         item = cJSON_GetObjectItem(root, KEY_AUX_RANGE);
         if (cJSON_IsNumber(item)) {
-            val = (float)item->valuedouble;
-            ESP_LOGI(TAG, "KEY_AUX_RANGE = %.2f", val);
-            nvs_set_blob(h, KEY_AUX_RANGE, &val, sizeof(val));
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_RANGE = %.2f", float_val);
+            nvs_set_blob(h, KEY_AUX_RANGE, &float_val, sizeof(float_val));
         } else {
             ESP_LOGI(TAG, "KEY_AUX_RANGE not found in JSON");
         }
@@ -124,9 +119,9 @@ void handle_shared_attributes(const char *json) {
         // AUX_MAX
         item = cJSON_GetObjectItem(root, KEY_AUX_MAX);
         if (cJSON_IsNumber(item)) {
-            val = (float)item->valuedouble;
-            ESP_LOGI(TAG, "KEY_AUX_MAX = %.2f", val);
-            nvs_set_blob(h, KEY_AUX_MAX, &val, sizeof(val));
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_MAX = %.2f", float_val);
+            nvs_set_blob(h, KEY_AUX_MAX, &float_val, sizeof(float_val));
         } else {
             ESP_LOGI(TAG, "KEY_AUX_MAX not found in JSON");
         }
@@ -134,9 +129,9 @@ void handle_shared_attributes(const char *json) {
         // EXT_RANGE
         item = cJSON_GetObjectItem(root, KEY_EXT_RANGE);
         if (cJSON_IsNumber(item)) {
-            val = (float)item->valuedouble;
-            ESP_LOGI(TAG, "KEY_EXT_RANGE = %.2f", val);
-            nvs_set_blob(h, KEY_EXT_RANGE, &val, sizeof(val));
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_RANGE = %.2f", float_val);
+            nvs_set_blob(h, KEY_EXT_RANGE, &float_val, sizeof(float_val));
         } else {
             ESP_LOGI(TAG, "KEY_EXT_RANGE not found in JSON");
         }
@@ -144,15 +139,68 @@ void handle_shared_attributes(const char *json) {
         // EXT_MAX
         item = cJSON_GetObjectItem(root, KEY_EXT_MAX);
         if (cJSON_IsNumber(item)) {
-            val = (float)item->valuedouble;
-            ESP_LOGI(TAG, "KEY_EXT_MAX = %.2f", val);
-            nvs_set_blob(h, KEY_EXT_MAX, &val, sizeof(val));
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_MAX = %.2f", float_val);
+            nvs_set_blob(h, KEY_EXT_MAX, &float_val, sizeof(float_val));
         } else {
             ESP_LOGI(TAG, "KEY_EXT_MAX not found in JSON");
         }
 
+        // Fill time (int)
+        item = cJSON_GetObjectItem(root, KEY_FILL_TIME);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_FILL_TIME = %d", int_val);
+            nvs_set_i32(h, KEY_FILL_TIME, int_val);
+        }
+
+        // Purge time (int)
+        item = cJSON_GetObjectItem(root, KEY_PURGE_TIME);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_PURGE_TIME = %d", int_val);
+            nvs_set_i32(h, KEY_PURGE_TIME, int_val);
+        }
+
+        // Sleep timeout (int)
+        item = cJSON_GetObjectItem(root, KEY_SLEEP_TIMEOUT);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_SLEEP_TIMEOUT = %d", int_val);
+            nvs_set_i32(h, KEY_SLEEP_TIMEOUT, int_val);
+        }
+
+        // Min DEF Level (int)
+        item = cJSON_GetObjectItem(root, KEY_MIN_DEF_LEVEL);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_MIN_DEF_LEVEL = %d", int_val);
+            nvs_set_i32(h, KEY_MIN_DEF_LEVEL, int_val);
+        }
+
+        // Commit changes to NVS
         nvs_commit(h);
         nvs_close(h);
+
+        // Retrieve integer values after saving
+        int fillTime = 0, purgeTime = 0, sleepTimeout = 0, minDEFLevel = 0;
+        if (nvs_open(NS_ATTR, NVS_READONLY, &h) == ESP_OK) {
+            nvs_get_i32(h, KEY_FILL_TIME, &fillTime);
+            nvs_get_i32(h, KEY_PURGE_TIME, &purgeTime);
+            nvs_get_i32(h, KEY_SLEEP_TIMEOUT, &sleepTimeout);
+            nvs_get_i32(h, KEY_MIN_DEF_LEVEL, &minDEFLevel);
+        } else {
+            ESP_LOGW(TAG, "Failed to open NVS for reading");
+        }
+        
+
+        // Send the values in data0–data3
+        ESP_LOGI(TAG, "Sending updated system message with fillTime: %d, purgeTime: %d, sleepTimeout: %d, minDEFLevel: %d",
+                 fillTime, purgeTime, sleepTimeout, minDEFLevel);
+        send_message(MSG_ID_SETTINGS, MSG_TYPE_DATA, (uint16_t)fillTime, (uint16_t)purgeTime, (uint16_t)sleepTimeout, (uint16_t)minDEFLevel);
+        publish_data();
+
+        
     } else {
         ESP_LOGW(TAG, "Failed to open NVS namespace: %s", NS_ATTR);
     }
@@ -213,56 +261,10 @@ void handle_rpc_request(const char *topic, const char *json) {
 }
 
 
-// Publish RPC response
-void send_rpc_response(const char *req_id, cJSON *result) {
-    char topic[64];
-    char *payload = cJSON_PrintUnformatted(result);
-    snprintf(topic, sizeof(topic), "v1/devices/me/rpc/response/%s", req_id);
-    
-    sim7600_mqtt_publish(topic, payload);
-    
-    free(payload);
-}
 
 
-// Publish stored attribute values from NVS as a single JSON via MQTT publish helper
-void publish_stored_attributes(void) {
-    float auxRange = 0, auxMax = 0, extRange = 0, extMax = 0;
-    nvs_handle_t h;
-    if (nvs_open(NS_ATTR, NVS_READONLY, &h) == ESP_OK) {
-        size_t size = sizeof(float);
-        nvs_get_blob(h, KEY_AUX_RANGE, &auxRange, &size);
-        size = sizeof(float);
-        nvs_get_blob(h, KEY_AUX_MAX,   &auxMax,   &size);
-        size = sizeof(float);
-        nvs_get_blob(h, KEY_EXT_RANGE, &extRange, &size);
-        size = sizeof(float);
-        nvs_get_blob(h, KEY_EXT_MAX,   &extMax,   &size);
-        nvs_close(h);
-    }
-   
-
-    // Create a cJSON object
-    cJSON *attr = cJSON_CreateObject();
-    if (attr == NULL) {
-    ESP_LOGE(TAG, "Failed to create cJSON object");
-    return;
-    }
-
-    cJSON_AddNumberToObject(attr, KEY_AUX_MAX, auxMax);
-    cJSON_AddNumberToObject(attr, KEY_AUX_RANGE, auxRange);
-    cJSON_AddNumberToObject(attr, KEY_EXT_MAX, extMax);
-    cJSON_AddNumberToObject(attr, KEY_EXT_RANGE, extRange);
-
-    char *json_string = cJSON_PrintUnformatted(attr);
 
 
-    // Use helper to publish
-    if (!sim7600_mqtt_publish(TOPIC_ATTR_UPDATES, json_string)) {
-        ESP_LOGE(TAG, "Failed to publish stored attributes");
-    }
-
-}
 
 
 //Function to retrieve values from flash
@@ -353,6 +355,8 @@ void handle_stop(void) {
 void handle_reboot(void) {
     ESP_LOGW(TAG, "Reboot command received");
     send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, RESET , 0, 0, 0);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);  // Delay to ensure message is sent
+    esp_restart();  // Restart the ESP32
     ESP_LOGI(TAG, "Reboot command sent to master");
 }
 
