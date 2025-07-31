@@ -6,9 +6,9 @@
 #define MSG_ID_TANK_LEVEL       2
 #define MSG_ID_MODE             3
 #define MSG_ID_COMMS            4 
-#define MSG_ID_24V_OUT          5
+#define MSG_ID_SPARE            5
 #define MSG_ID_BATT             6
-#define MSG_ID_ANALOG_OUT       7
+#define MSG_ID_OUTPUTS          7
 #define MSG_ID_420_INPUTS       8
 #define MSG_ID_ANALOG_INPUTS    9
 #define MSG_ID_PT1000           10

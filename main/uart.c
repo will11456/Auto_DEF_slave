@@ -92,7 +92,7 @@ void master_tx_task(void *param){
 
     while (1) {
         if (xQueueReceive(master_cmd_queue, &message, portMAX_DELAY) == pdTRUE) {
-            ESP_LOGI("MASTER_TX", "Sending command: %s", message);
+            //ESP_LOGI("MASTER_TX", "Sending command: %s", message);
             uart_write_bytes(UART_NUM, message, strlen(message));
             //uart_write_bytes(UART_NUM, "\r\n", 2);
             

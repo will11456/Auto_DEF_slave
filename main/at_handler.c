@@ -40,7 +40,6 @@ void rx_task(void *arg) {
                     // Flush line before prompt
                     if (line_idx > 0) {
                         line[line_idx] = '\0';
-
                         if (!in_rpc_block &&
                             (strstr(line, "+QMTRECV:") || strstr(line, "RDY") ||
                              strstr(line, "SMS DONE") || strstr(line, "PB DONE"))) {
@@ -67,7 +66,6 @@ void rx_task(void *arg) {
                 // End of line
                 if (c == '\n' || line_idx >= SIM7600_UART_BUF_SIZE - 1) {
                     line[line_idx] = '\0';
-
                     if (line_idx > 0) {
                         if (strstr(line, "+CMQTTRXSTART:")) {
                             in_rpc_block = true;

@@ -24,6 +24,7 @@
 
 #define TOPIC_ATTR_UPDATES      "v1/devices/me/attributes"
 #define TOPIC_RPC_REQUEST_BASE  "v1/devices/me/rpc/request/"
+#define TOPIC_ATTR_REQUEST_BASE "v1/devices/me/attributes/response/1"
 
 
 
@@ -36,7 +37,7 @@ void mqtt_handle_urc(const char *urc) {
     static char current_topic[128] = {0};
     static char current_payload[512] = {0};
 
-    //ESP_LOGI(TAG, "Received URC: %s", urc);
+    ESP_LOGI(TAG, "Received URC: %s", urc);
 
     // Start of MQTT RX block
     if (strstr(urc, "+CMQTTRXSTART:")) {
@@ -66,10 +67,17 @@ void mqtt_handle_urc(const char *urc) {
         if (strlen(current_topic) > 0 && strlen(current_payload) > 0) {
             if (strcmp(current_topic, TOPIC_ATTR_UPDATES) == 0) {
                 handle_shared_attributes(current_payload);
-            } else if (strncmp(current_topic, TOPIC_RPC_REQUEST_BASE,
+            } 
+            else if (strncmp(current_topic, TOPIC_RPC_REQUEST_BASE,
                                strlen(TOPIC_RPC_REQUEST_BASE)) == 0) {
                 handle_rpc_request(current_topic, current_payload);
-            } else {
+            } 
+            else if (strncmp(current_topic, TOPIC_ATTR_REQUEST_BASE,
+                                strlen(TOPIC_ATTR_REQUEST_BASE)) == 0) {
+                handle_shared_attributes(current_payload);
+            }
+            
+            else {
                 ESP_LOGW(TAG, "Unhandled topic: %s with payload: %s",
                          current_topic, current_payload);
             }
@@ -100,6 +108,14 @@ void handle_shared_attributes(const char *json) {
         return;
     }
 
+   
+
+    cJSON *container = cJSON_GetObjectItem(root, "shared");
+    if (!cJSON_IsObject(container)) {
+        container = root;  // fallback to root if not wrapped
+    }
+
+
     nvs_handle_t h;
     if (nvs_open(NS_ATTR, NVS_READWRITE, &h) == ESP_OK) {
         cJSON *item;
@@ -107,7 +123,7 @@ void handle_shared_attributes(const char *json) {
         int int_val;
 
         // AUX_RANGE
-        item = cJSON_GetObjectItem(root, KEY_AUX_RANGE);
+        item = cJSON_GetObjectItem(container, KEY_AUX_RANGE);
         if (cJSON_IsNumber(item)) {
             float_val = (float)item->valuedouble;
             ESP_LOGI(TAG, "KEY_AUX_RANGE = %.2f", float_val);
@@ -117,7 +133,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // AUX_MAX
-        item = cJSON_GetObjectItem(root, KEY_AUX_MAX);
+        item = cJSON_GetObjectItem(container, KEY_AUX_MAX);
         if (cJSON_IsNumber(item)) {
             float_val = (float)item->valuedouble;
             ESP_LOGI(TAG, "KEY_AUX_MAX = %.2f", float_val);
@@ -127,7 +143,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // EXT_RANGE
-        item = cJSON_GetObjectItem(root, KEY_EXT_RANGE);
+        item = cJSON_GetObjectItem(container, KEY_EXT_RANGE);
         if (cJSON_IsNumber(item)) {
             float_val = (float)item->valuedouble;
             ESP_LOGI(TAG, "KEY_EXT_RANGE = %.2f", float_val);
@@ -137,7 +153,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // EXT_MAX
-        item = cJSON_GetObjectItem(root, KEY_EXT_MAX);
+        item = cJSON_GetObjectItem(container, KEY_EXT_MAX);
         if (cJSON_IsNumber(item)) {
             float_val = (float)item->valuedouble;
             ESP_LOGI(TAG, "KEY_EXT_MAX = %.2f", float_val);
@@ -147,7 +163,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // Fill time (int)
-        item = cJSON_GetObjectItem(root, KEY_FILL_TIME);
+        item = cJSON_GetObjectItem(container, KEY_FILL_TIME);
         if (cJSON_IsNumber(item)) {
             int_val = (int)item->valuedouble;
             ESP_LOGI(TAG, "KEY_FILL_TIME = %d", int_val);
@@ -155,7 +171,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // Purge time (int)
-        item = cJSON_GetObjectItem(root, KEY_PURGE_TIME);
+        item = cJSON_GetObjectItem(container, KEY_PURGE_TIME);
         if (cJSON_IsNumber(item)) {
             int_val = (int)item->valuedouble;
             ESP_LOGI(TAG, "KEY_PURGE_TIME = %d", int_val);
@@ -163,7 +179,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // Sleep timeout (int)
-        item = cJSON_GetObjectItem(root, KEY_SLEEP_TIMEOUT);
+        item = cJSON_GetObjectItem(container, KEY_SLEEP_TIMEOUT);
         if (cJSON_IsNumber(item)) {
             int_val = (int)item->valuedouble;
             ESP_LOGI(TAG, "KEY_SLEEP_TIMEOUT = %d", int_val);
@@ -171,7 +187,7 @@ void handle_shared_attributes(const char *json) {
         }
 
         // Min DEF Level (int)
-        item = cJSON_GetObjectItem(root, KEY_MIN_DEF_LEVEL);
+        item = cJSON_GetObjectItem(container, KEY_MIN_DEF_LEVEL);
         if (cJSON_IsNumber(item)) {
             int_val = (int)item->valuedouble;
             ESP_LOGI(TAG, "KEY_MIN_DEF_LEVEL = %d", int_val);

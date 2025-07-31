@@ -38,11 +38,13 @@ QueueHandle_t at_resp_queue;
 #define MQTT_USERNAME    "dev"
 #define MQTT_PASSWORD    "dev"
 
-#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
-#define MQTT_ATTR_PUBLISH "v1/devices/me/attributes"
-#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"
-#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"
+#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"       //topic for publishing telemetry data
+#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"   //subscribe to attributes
+#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"   //subscribe to RPC requests
 
+#define MQTT_ATTR_REQUEST "v1/devices/me/attributes/request/1"  //topic for requesting attributes on
+#define MQTT_ATTR_RESPONSE "v1/devices/me/attributes/response/+" //topic for responding to attributes
+#define ATTR_REQUEST_ID 1
 
 
 
@@ -372,6 +374,34 @@ bool sim7600_network_init(void) {
 
     // ===== MQTT =====
 
+    //helper function
+    bool request_all_shared_attributes(void) {
+        cJSON *root = cJSON_CreateObject();
+        bool result = false;
+
+        if (!root) {
+            ESP_LOGE("ATTR_REQ", "Failed to create JSON object");
+            return false;
+        }
+
+        cJSON_AddStringToObject(root, "sharedKeys",
+            "AuxTankMax,AuxTankRange,ExtTankMax,ExtTankRange,FillTime,PurgeTime,SleepTimeout,MinDEFLevel");
+
+        char *json_str = cJSON_PrintUnformatted(root);
+        if (json_str) {
+            ESP_LOGI("ATTR_REQ", "Requesting shared attributes: %s", json_str);
+            result = sim7600_mqtt_publish(MQTT_ATTR_REQUEST, json_str);  // This should return bool
+            free(json_str);
+        } else {
+            ESP_LOGE("ATTR_REQ", "Failed to serialize JSON");
+        }
+
+        cJSON_Delete(root);
+        return result;
+    }
+
+
+
     //Setup
     bool sim7600_mqtt_cmqtt_setup(const char *broker, uint16_t port,
                                 const char *client_id, const char *user, const char *pass) {
@@ -414,17 +444,40 @@ bool sim7600_network_init(void) {
 
         
         //Subscribe to telemetry attributes
-        sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1);
+        bool success = true;
+
+        if (!sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to ATTR_SUBSCRIBE");
+            success = false;
+        }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-        sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1);
+        if (!sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to RPC_REQUEST");
+            success = false;
+        }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-        //request latest shared attributes on boot v1/devices/me/attributes/request/1
-        
+        if (!sim7600_mqtt_subscribe(MQTT_ATTR_RESPONSE, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to ATTR_RESPONSE");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
 
+        if (!request_all_shared_attributes()) {
+            ESP_LOGE("MQTT", "Failed to request shared attributes");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (!success) {
+            ESP_LOGE("MQTT", "One or more MQTT setup steps failed — restarting ESP");
+            vTaskDelay(2000 / portTICK_PERIOD_MS); // small delay before reset (optional)
+            esp_restart();
+        }
         
         xEventGroupSetBits(systemEvents, MQTT_INIT);
+        
 
         lvgl_lock(LVGL_LOCK_WAIT_TIME);
         lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -501,6 +554,7 @@ bool sim7600_network_init(void) {
         resp = send_at_command(cmd, 10000);
         if (!resp || !strstr(resp, ">")) {
             ESP_LOGE(TAG, "❌ Failed to set topic");
+            //esp_restart(); // Restart if failed to set topic
             xSemaphoreGive(publish_mutex);
             return false;
         }

@@ -11,7 +11,6 @@
 #include "mqtt.h"
 #include "publish.h"
 #include "message_ids.h"
-#include "config_values.h"
 
 static const char *TAG = "Data";
 
@@ -71,8 +70,8 @@ void handle_message(const DecodedMessage *decoded_msg) {
             //ESP_LOGI(TAG, "recieved COMM         message ID: %d", decoded_msg->message_id);
             break;
 
-        case MSG_ID_24V_OUT:
-            handle_output_message(decoded_msg);
+        case MSG_ID_SPARE:
+            //handle_outputs_message(decoded_msg);
             //ESP_LOGI(TAG, "recieved 24V_OUT      message ID: %d", decoded_msg->message_id);
             break;
 
@@ -80,7 +79,13 @@ void handle_message(const DecodedMessage *decoded_msg) {
             handle_batt_message(decoded_msg);
             //ESP_LOGI(TAG, "recieved NPN_OUT      message ID: %d", decoded_msg->message_id);
             break;
+        
+        case MSG_ID_OUTPUTS:
+            handle_outputs_message(decoded_msg);
+            publish_data();
 
+            //ESP_LOGI(TAG, "recieved OUTPUTS      message ID: %d", decoded_msg->message_id);
+            break;
                 
         case MSG_ID_PT1000:
             handle_pt1000_message(decoded_msg);
@@ -220,7 +225,12 @@ void handle_tank_message(const DecodedMessage *decoded_msg) {
     snprintf(ext_buf, 32, "%d", ext_tank_percent);
     snprintf(aux_buf, 32, "%d", aux_tank_percent);
 
-
+    if (ext_tank_percent < -1){
+        ext_tank_percent = -1;
+    }
+    if (aux_tank_percent < -1){
+        aux_tank_percent = -1;
+    }
 
 
     if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
@@ -342,7 +352,85 @@ void handle_comms_message(const DecodedMessage *decoded_msg){
     
 
 
-void handle_output_message(const DecodedMessage *decoded_msg){
+void handle_outputs_message(const DecodedMessage *decoded_msg){
+    int output_id = decoded_msg->data0;
+    bool output_state = decoded_msg->data1;
+    //ESP_LOGI(TAG, "Output ID: %d, State: %d", output_id, output_state);
+
+    if (output_id == 0) {
+        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        shared_sensor_data.out1 = output_state;
+        xSemaphoreGive(data_mutex);
+        if (output_state == true) {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out124VTextArea, output_state ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        } 
+        else {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out124VTextArea, output_state ? lv_color_hex(0xFF0000) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+    }
+
+    else if (output_id == 1) {
+        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        shared_sensor_data.out2 = output_state;
+        xSemaphoreGive(data_mutex);
+        if (output_state == true) {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out224VTextArea, output_state ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+        else {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out224VTextArea, output_state ? lv_color_hex(0xFF0000) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+    }
+
+    else if (output_id == 2) {
+        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        shared_sensor_data.npn1 = output_state;
+        xSemaphoreGive(data_mutex);
+        if (output_state == true) {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out1NPNTextArea1, output_state ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+        else {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out1NPNTextArea1, output_state ? lv_color_hex(0xFF0000) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+    }
+    
+    
+    
+    else if (output_id == 3) {
+        xSemaphoreTake(data_mutex, portMAX_DELAY);
+        shared_sensor_data.npn2 = output_state;
+        xSemaphoreGive(data_mutex);
+        if (output_state == true) {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out2NPNTextArea2, output_state ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+        else {
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME)) {
+                lv_obj_set_style_text_color(ui_Out2NPNTextArea2, output_state ? lv_color_hex(0xFF0000) : lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lvgl_unlock();
+            }
+        }
+    }
+
 
 }
 
@@ -356,7 +444,7 @@ void handle_batt_message(const DecodedMessage *decoded_msg){
         }
     }
 
-    else{
+    else {
 
         float batt_float = (float)decoded_msg->data0/1000.0;
 

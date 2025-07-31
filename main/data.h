@@ -72,7 +72,7 @@ void handle_bme280_message(const DecodedMessage *decoded_msg);
 void handle_tank_message(const DecodedMessage *decoded_msg);
 void handle_mode_message(const DecodedMessage *decoded_msg);
 void handle_comms_message(const DecodedMessage *decoded_msg);
-void handle_output_message(const DecodedMessage *decoded_msg);
+void handle_outputs_message(const DecodedMessage *decoded_msg);
 void handle_batt_message(const DecodedMessage *decoded_msg);
 void handle_analog_out_message(const DecodedMessage *decoded_msg);
 void handle_420_inputs_message(const DecodedMessage *decoded_msg);

@@ -58,6 +58,8 @@ bool sim7600_network_init(void);
 bool sim7600_mqtt_connect(void);
 bool sim7600_mqtt_publish(const char *topic, const char *message);
 bool sim7600_mqtt_subscribe(const char *topic, int qos);
+bool request_all_shared_attributes(void);
+
 
 void modem_task(void *param);
 void monitor_task(void *param);

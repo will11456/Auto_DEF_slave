@@ -112,8 +112,7 @@ void publish_task(void *pvParameter){
         }
 
         // Add data to the JSON object
-        data.out1 = true;
-
+        
         cJSON_AddNumberToObject(root, "Internal_Tank", data.int_tank);
         cJSON_AddNumberToObject(root, "External_Tank", data.ext_tank); 
         cJSON_AddNumberToObject(root, "Aux_Tank", data.aux_tank);
@@ -127,6 +126,7 @@ void publish_task(void *pvParameter){
         cJSON_AddNumberToObject(root, "CSQ", data.csq);
         cJSON_AddBoolToObject(root, "CAN_Status", data.can_status);
 
+        //Outputs
         cJSON_AddBoolToObject(root, "OUT1", data.out1);
         cJSON_AddBoolToObject(root, "OUT2", data.out2);
         cJSON_AddBoolToObject(root, "NPN1", data.npn1);
@@ -143,7 +143,8 @@ void publish_task(void *pvParameter){
         cJSON_AddNumberToObject(root, "AuxTankMax", auxMax);
         cJSON_AddNumberToObject(root, "ExtTankRange", extRange);
         cJSON_AddNumberToObject(root, "ExtTankMax", extMax);
-
+        
+        //Settings
         cJSON_AddNumberToObject(root, "FillTime", fillTime);
         cJSON_AddNumberToObject(root, "PurgeTime", purgeTime);
         cJSON_AddNumberToObject(root, "SleepTimeout", sleepTimeout);
