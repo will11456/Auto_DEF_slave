@@ -1,0 +1,42 @@
+# ESP-IDF build artifacts
+build/
+sdkconfig.old
+sdkconfig
+sdkconfig.defaults
+*.bin
+*.elf
+*.map
+
+# Flash images
+*.bin
+*.hex
+
+# Partition table
+partition_table/
+
+# ESP-IDF Python environment (if using venv)
+.env/
+venv/
+ENV/
+
+# Clangd cache
+.cache/
+
+# VS Code settings (optional)
+.vscode/
+
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Auto-generated files
+*.pyc
+*.pyo
+*.log
+
+# Git merge files
+*.orig
+
+# User-added (add other folders you don't want tracked)
