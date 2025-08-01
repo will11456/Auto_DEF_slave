@@ -1,320 +1,669 @@
+#include "freertos/idf_additions.h"
+#include "mqtt.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
-#include "display.h"
 #include "uart.h"
-#include "data.h"
-
-// UART port number for SIM800L
-#define SIM800L_UART_PORT UART_NUM_2
-
-// UART buffer size
-#define SIM800L_UART_BUF_SIZE 1024
-
-static const char* TAG = "MODEM";
+#include "esp_log.h"
+#include "freertos/task.h"
+#include <string.h>
+#include <stdio.h>
+#include "display.h"
+#include "freertos/semphr.h"
+#include "at_handler.h"
 
 
-void sim800l_init(void) {
-    // Configure UART parameters
-    const uart_config_t uart_config = {
-        .baud_rate = SIM800L_BAUD_RATE,
+
+
+static const char *TAG = "MODEM";
+
+//mutex to proect UART
+SemaphoreHandle_t at_mutex = NULL;  
+SemaphoreHandle_t publish_mutex = NULL;           // Mutex to protect AT command access
+SemaphoreHandle_t publish_trigger = NULL;      //semaphore to trigger publish task
+
+QueueHandle_t incoming_queue;
+QueueHandle_t at_send_queue;
+QueueHandle_t at_resp_queue;
+
+// ===== Configuration =====
+
+#define APN              "eapn1.net"
+#define APN_USER         "DynamicF"
+#define APN_PASS         "DynamicF"
+
+#define MQTT_BROKER      "eu.thingsboard.cloud"
+#define MQTT_PORT        1883
+#define MQTT_CLIENT_ID   "esp32_dev1"
+#define MQTT_USERNAME    "dev"
+#define MQTT_PASSWORD    "dev"
+
+#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"       //topic for publishing telemetry data
+#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"   //subscribe to attributes
+#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"   //subscribe to RPC requests
+
+#define MQTT_ATTR_REQUEST "v1/devices/me/attributes/request/1"  //topic for requesting attributes on
+#define MQTT_ATTR_RESPONSE "v1/devices/me/attributes/response/+" //topic for responding to attributes
+#define ATTR_REQUEST_ID 1
+
+
+
+// ===== UART & GPIO Setup =====
+
+void sim7600_init(void) {
+
+    if (at_mutex == NULL) {
+        at_mutex = xSemaphoreCreateMutex();
+    }
+
+    if (publish_mutex == NULL) {
+        publish_mutex = xSemaphoreCreateMutex();
+    }
+
+    uart_config_t uart_config = {
+        .baud_rate = SIM7600_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
+        .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    // Install UART driver
-    ESP_ERROR_CHECK(uart_driver_install(SIM800L_UART_PORT, SIM800L_UART_BUF_SIZE, 0, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(SIM800L_UART_PORT, &uart_config));
+    uart_driver_install(SIM7600_UART_PORT, UART_BUF_SIZE, 0, EVENT_QUEUE_LEN, NULL, 0);
+    uart_param_config(SIM7600_UART_PORT, &uart_config);
+    uart_set_pin(SIM7600_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-    // Set UART pins
-    ESP_ERROR_CHECK(uart_set_pin(SIM800L_UART_PORT, MODEM_TX, MODEM_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    // Configure power and reset pins as outputs
-    gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
-
-    // Initially power off the SIM800L
-    sim800l_power_off();
-}
-
-void sim800l_power_on(void) {
-    // Toggle the power key to power on the SIM800L
-    ESP_LOGW(TAG, "Powering on SIM800L");
-    gpio_set_level(MODEM_PWR_KEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    gpio_set_level(MODEM_PWR_KEY, 0);
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for the module to power on
-}
-
-void sim800l_power_off(void) {
-    // Toggle the power key to power off the SIM800L
-    ESP_LOGW(TAG, "Powering off SIM800L");
-    gpio_set_level(MODEM_PWR_KEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(1200));
-    gpio_set_level(MODEM_PWR_KEY, 0);
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait for the module to power off
-}
-
-
-
-void sim800l_send_command(const char* command) {
-    // Send AT command to the SIM800L
-    uart_write_bytes(SIM800L_UART_PORT, command, strlen(command));
-    uart_write_bytes(SIM800L_UART_PORT, "\r\n", 2);
-}
-
-int sim800l_read_response(char* buffer, uint32_t buffer_size) {
-    // Read response from the SIM800L
-    int len = uart_read_bytes(SIM800L_UART_PORT, (uint8_t*)buffer, buffer_size - 1, pdMS_TO_TICKS(5000));
-    if (len > 0) {
-        buffer[len] = '\0'; // Null-terminate the received string
-    }
-    return len;
-}
-
-void send_at_command_test(const char* command) {
-    char response[1024];  // Buffer to hold the response from SIM800L
-
-    // Log the command being sent
-    ESP_LOGI(TAG, "Sending command: %s", command);
-
-    // Send the AT command
-    sim800l_send_command(command);
-
-    // Read the response from the SIM800L
-    int len = sim800l_read_response(response, sizeof(response));
-
-    // Check if a response was received
-    if (len > 0) {
-        // Null-terminate and log the response
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Received response: %s", response);
-    } else {
-        // Log that no response was received
-        ESP_LOGW(TAG, "No response received for command: %s", command);
-    }
-}
-
-
-
-
-
-void send_sms(const char* phone_number, const char* message) {
-    char response[1024];
-    char command[160];
-
-    // Ensure SIM800L is initialized and powered on before calling this function
-
-    // Set SMS text mode
-    ESP_LOGI(TAG, "Setting SMS to text mode");
-    sim800l_send_command("AT+CMGF=1");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0'; // Ensure the response is null-terminated
-        ESP_LOGI(TAG, "Response to AT+CMGF=1: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGF command");
+    at_resp_queue = xQueueCreate(AT_RESP_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
+    if (at_resp_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create at_resp_queue");
     }
 
-    // Prepare command to set the recipient's phone number
-    snprintf(command, sizeof(command), "AT+CMGS=\"%s\"", phone_number);
-    ESP_LOGI(TAG, "Setting recipient: %s", phone_number);
-    sim800l_send_command(command);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response to AT+CMGS: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGS command");
-    }
-
-    // Send the message text
-    ESP_LOGI(TAG, "Sending message: %s", message);
-    uart_write_bytes(SIM800L_UART_PORT, message, strlen(message));
-
-    // End the message with Ctrl+Z (ASCII 26)
-    uart_write_bytes(SIM800L_UART_PORT, "\x1A", 1);
-    ESP_LOGI(TAG, "Ending message with Ctrl+Z");
-    vTaskDelay(pdMS_TO_TICKS(5000));  // Wait for the message to be sent
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Final response after sending SMS: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No final response received");
-    }
-}
-
-
-
-void read_sms(void) {
-    char response[2048];
-    char command[32];
     
-    // Ensure SIM800L is initialized and powered on before calling this function
+    at_send_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
+    if (at_send_queue == NULL) {            
+        ESP_LOGE(TAG, "Failed to create at_send_queue");
+    }
 
-    // Set SMS text mode
-    ESP_LOGI(TAG, "Setting SMS to text mode");
-    sim800l_send_command("AT+CMGF=1");
+    incoming_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(char[SIM7600_UART_BUF_SIZE]));
+    if (incoming_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create incoming_queue");
+    }
+
+    xTaskCreatePinnedToCore(rx_task, "rx_task", 2048*2, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(tx_task, "tx_task", 2048*2, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(mqtt_urc_task, "mqtt_urc_task", 2048*4, NULL, 1, NULL, 0);
+
+
+
+    gpio_set_direction(MODEM_PWR_KEY, GPIO_MODE_OUTPUT);
+    gpio_set_direction(RAIL_4V_EN, GPIO_MODE_OUTPUT);
+
+    sim7600_power_off();
     vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response to AT+CMGF=1: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGF command");
-    }
+    sim7600_power_on();
+    vTaskDelay(pdMS_TO_TICKS(8000));
+}
 
-    // List all messages
-    ESP_LOGI(TAG, "Listing all SMS messages");
-    sim800l_send_command("AT+CMGL=\"ALL\"");
-    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for response
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Messages: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for CMGL command");
-    }
+void sim7600_power_on(void) {
+    ESP_LOGI(TAG, "Powering on SIM7600E");
+    gpio_set_level(RAIL_4V_EN, 1);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    gpio_set_level(MODEM_PWR_KEY, 0);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    gpio_set_level(MODEM_PWR_KEY, 1);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+}
+
+void sim7600_power_off(void) {
+    ESP_LOGI(TAG, "Powering off SIM7600E");
+    gpio_set_level(RAIL_4V_EN, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+// ===== AT Communication =====
+
+void sim7600_send_command(const char* command) {
+    uart_write_bytes(SIM7600_UART_PORT, command, strlen(command));
+    uart_write_bytes(SIM7600_UART_PORT, "\r\n", 2);
 }
 
 
-void connect_to_internet(const char* apn, const char* user, const char* password) {
-    char response[1024];
+const char *send_at_command(const char *command, int timeout_ms) {
+    static char response[SIM7600_UART_BUF_SIZE];
+    response[0] = '\0';
 
-    // Ensure SIM800L is initialized and powered on before calling this function
-
-    // Set the SIM800L to GPRS mode
-    ESP_LOGI(TAG, "Setting SIM800L to GPRS mode");
-    sim800l_send_command("AT+SAPBR=3,1,\"Contype\",\"GPRS\"");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    int len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for GPRS mode command");
+    // Create a temporary queue for this AT command
+    QueueHandle_t temp_resp_queue = xQueueCreate(10, sizeof(char[SIM7600_UART_BUF_SIZE]));
+    if (!temp_resp_queue) {
+        ESP_LOGE("AT", "Failed to create response queue");
+        return NULL;
     }
 
-    // Set the APN
-    ESP_LOGI(TAG, "Setting APN to: %s", apn);
-    char command[128];
-    snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"APN\",\"%s\"", apn);
-    sim800l_send_command(command);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for APN command");
+    // Set this queue as the active receiver in the RX task
+    at_handler_set_response_queue(temp_resp_queue);
+
+    // Flush any old responses
+    char drain[SIM7600_UART_BUF_SIZE];
+    while (xQueueReceive(temp_resp_queue, drain, 0) == pdTRUE);
+
+    ESP_LOGI("MODEM", ">> %s", command);
+
+    char copy[SIM7600_UART_BUF_SIZE];
+    snprintf(copy, sizeof(copy), "%s", command);
+
+    if (xQueueSend(at_send_queue, &copy, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW("AT", "❌ Failed to enqueue command: %s", command);
+        vQueueDelete(temp_resp_queue);
+        at_handler_set_response_queue(NULL);
+        return NULL;
     }
 
-    // Set the user name, if necessary
-    if (user && strlen(user) > 0) {
-        ESP_LOGI(TAG, "Setting user name: %s", user);
-        snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"USER\",\"%s\"", user);
-        sim800l_send_command(command);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        len = sim800l_read_response(response, sizeof(response));
-        if (len > 0) {
-            response[len] = '\0';
-            ESP_LOGI(TAG, "Response: %s", response);
-        } else {
-            ESP_LOGW(TAG, "No response for USER command");
+    TickType_t start = xTaskGetTickCount();
+    TickType_t wait = pdMS_TO_TICKS(timeout_ms);
+    bool got_any_line = false;
+
+    char line[SIM7600_UART_BUF_SIZE];
+    while ((xTaskGetTickCount() - start) < wait) {
+        if (xQueueReceive(temp_resp_queue, line, pdMS_TO_TICKS(300)) == pdTRUE) {
+            got_any_line = true;
+
+            // Append to response buffer
+            strncat(response, line, SIM7600_UART_BUF_SIZE - strlen(response) - 2);
+            strncat(response, "\n", SIM7600_UART_BUF_SIZE - strlen(response) - 1);
+
+            if (strcmp(line, "OK") == 0 || strcmp(line, "ERROR") == 0 || strcmp(line, ">") == 0) {
+                ESP_LOGI("MODEM", "<< [Complete Response]\n%s", response);
+                break;
+            }
         }
     }
 
-    // Set the password, if necessary
-    if (password && strlen(password) > 0) {
-        ESP_LOGI(TAG, "Setting password");
-        snprintf(command, sizeof(command), "AT+SAPBR=3,1,\"PWD\",\"%s\"", password);
-        sim800l_send_command(command);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        len = sim800l_read_response(response, sizeof(response));
-        if (len > 0) {
-            response[len] = '\0';
-            ESP_LOGI(TAG, "Response: %s", response);
-        } else {
-            ESP_LOGW(TAG, "No response for PWD command");
-        }
+    if (!got_any_line) {
+        ESP_LOGW("AT", "❌ No response (timeout %d ms): %s", timeout_ms, command);
     }
 
-    // Open a GPRS context
-    ESP_LOGI(TAG, "Opening GPRS context");
-    sim800l_send_command("AT+SAPBR=1,1");
-    vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for the context to open
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-    } else {
-        ESP_LOGW(TAG, "No response for opening GPRS context");
-    }
+    vQueueDelete(temp_resp_queue);
+    at_handler_set_response_queue(NULL);  // Unhook
 
-    // Query GPRS context status
-    ESP_LOGI(TAG, "Querying GPRS context status");
-    sim800l_send_command("AT+SAPBR=2,1");
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    len = sim800l_read_response(response, sizeof(response));
-    if (len > 0) {
-        response[len] = '\0';
-        ESP_LOGI(TAG, "Response: %s", response);
-        if (strstr(response, "+SAPBR: 1,1")) {
-            ESP_LOGI(TAG, "GPRS context opened successfully");
-        } else {
-            ESP_LOGW(TAG, "Failed to open GPRS context");
-        }
-    } else {
-        ESP_LOGW(TAG, "No response for GPRS context status");
-    }
-
-    // Get the IP address
-    // ESP_LOGI(TAG, "Getting IP address");
-    // sim800l_send_command("AT+CIFSR");
-    // vTaskDelay(pdMS_TO_TICKS(2000));  // Wait for the IP address
-    // len = sim800l_read_response(response, sizeof(response));
-    // if (len > 0) {
-    //     response[len] = '\0';
-    //     ESP_LOGI(TAG, "IP Address: %s", response);
-    // } else {
-    //     ESP_LOGW(TAG, "No response for IP address request");
-    // }
+    return got_any_line ? response : NULL;
 }
 
+
+
+bool send_raw_uart_data(const char *data) {
+    if (!at_send_queue || data == NULL) {
+        ESP_LOGW("TX", "❌ Cannot send raw data: null input or uninitialized queue");
+        return false;
+    }
+
+    char copy[SIM7600_UART_BUF_SIZE];
+    snprintf(copy, sizeof(copy), "%s", data);
+
+    if (xQueueSend(at_send_queue, &copy, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW("TX", "❌ Failed to enqueue raw data: %s", data);
+        return false;
+    }
+
+    //ESP_LOGI("TX", "📤 Raw data enqueued: %s", data);
+    return true;
+}
+
+
+
+// ===== Network Init =====
+
+bool sim7080_wait_for_sim_and_signal(int max_attempts, int delay_ms) {
+    const char *resp;
+    bool sim_ready = false;
+    bool signal_ok = false;
+    int rssi = 0;
+
+    ESP_LOGI(TAG, "Waiting for SIM and signal...");
+    vTaskDelay(3000 / portTICK_PERIOD_MS); // Allow time for SIM to initialize
+
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
+        // SIM status
+        resp = send_at_command("AT+CPIN?", 3000);
+        if (resp && strstr(resp, "+CPIN: READY")) {
+            sim_ready = true;
+        } else {
+            ESP_LOGW(TAG, "[%02d] SIM not ready", attempt + 1);
+        }
+
+        // Signal strength
+        resp = send_at_command("AT+CSQ", 5000);
+        if (resp) {
+            char *csq_ptr = strstr(resp, "+CSQ:");
+            if (csq_ptr) {
+                int rssi_val = 0;
+                if (sscanf(csq_ptr, "+CSQ: %d", &rssi_val) == 1) {
+                    rssi = rssi_val;
+                    ESP_LOGI(TAG, "[%02d] RSSI: %d", attempt + 1, rssi);
+                    signal_ok = (rssi != 99);
+                } else {
+                    ESP_LOGW(TAG, "[%02d] Failed to parse RSSI", attempt + 1);
+                }
+            } else {
+                ESP_LOGW(TAG, "[%02d] No +CSQ response", attempt + 1);
+            }
+        }
+
+        if (sim_ready && signal_ok) {
+            ESP_LOGI(TAG, "✅ SIM and signal ready");
+            return true;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+
+    ESP_LOGE(TAG, "❌ SIM or signal not ready after %d attempts", max_attempts);
+    return false;
+}
+
+
+bool sim7600_wait_for_ip(int timeout_ms) {
+    const char *resp;
+    char ip[32] = {0};
+
+    ESP_LOGI(TAG, "🕒 Waiting for IP address (timeout: %d s)...", timeout_ms);
+    uint32_t start_time = xTaskGetTickCount();
+    const int interval_ms = 2000;
+
+    while ((xTaskGetTickCount() - start_time) * portTICK_PERIOD_MS < timeout_ms) {
+        resp = send_at_command("AT+CGPADDR=1", 20000);
+        if (resp) {
+            char *ptr = strstr(resp, "+CGPADDR: 1,");
+            if (ptr) {
+                ptr += strlen("+CGPADDR: 1,");
+                const char *end = strchr(ptr, '\n');
+                if (!end) end = strchr(ptr, '\0');
+                if (end && (end - ptr) < sizeof(ip)) {
+                    strncpy(ip, ptr, end - ptr);
+                    ip[end - ptr] = '\0';
+
+                    if (strcmp(ip, "0.0.0.0") != 0 && strlen(ip) > 0) {
+                        ESP_LOGI(TAG, "✅ IP assigned: %s", ip);
+                        return true;
+                    } else {
+                        ESP_LOGW(TAG, "⏳ IP still 0.0.0.0, retrying...");
+                    }
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "❌ No response to AT+CGPADDR");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(interval_ms));
+    }
+
+    ESP_LOGE(TAG, "❌ Timeout waiting for valid IP address");
+    return false;
+}
+
+
+
+
+bool sim7600_network_init(void) {
+    const char *resp;
+
+    //Check network registration
+    int creg_attempts = 80;
+
+    ESP_LOGI(TAG, "Checking network registration status...");
+
+    for (int i = 0; i < creg_attempts; i++) {
+        resp = send_at_command("AT+CREG?", 3000);
+        if (resp) {
+            char *ptr = strstr(resp, "+CREG:");
+            if (ptr) {
+                int n = 0, stat = 0;
+                if (sscanf(ptr, "+CREG: %d,%d", &n, &stat) == 2) {
+                    ESP_LOGI(TAG, "[%d] CREG: %d (0=not reg, 1=home, 5=roaming)", i + 1, stat);
+                    if (stat == 1 || stat == 5) {
+                        ESP_LOGI(TAG, "✅ Registered to network");
+                        break;
+                    }
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "[%d] No response to AT+CREG?", i + 1);
+        }
+
+        if (i == creg_attempts - 1) {
+            ESP_LOGE(TAG, "❌ Network registration failed after %d attempts. Rebooting...", creg_attempts);
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    
+    send_at_command("AT+CNMP=38", 2000);  // 38 = LTE only, int timeout_ms)
+    send_at_command("AT+CMNB=3", 2000);    // Set LTE-only preference
+    
+    send_at_command("AT+CMEE=2", 3000);
+    send_at_command("AT+CGATT=1", 20000);
+    send_at_command("AT+CGMR", 1000);
+
+ 
+
+
+    char cmd[128];
+
+    snprintf(cmd, sizeof(cmd), "AT+CGDCONT=1,\"IP\",\"%s\"", APN);
+    resp = send_at_command(cmd, 5000);
+
+    snprintf(cmd, sizeof(cmd), "AT+CGAUTH=1,1,\"%s\",\"%s\"", APN_USER, APN_PASS);
+    resp = send_at_command(cmd, 5000);
+    
+    send_at_command("AT+CGACT=1,1", 30000);
+
+    send_at_command("AT+CGPADDR=1", 20000);
+
+
+    if (!sim7600_wait_for_ip(60000)) {
+        ESP_LOGE(TAG, "IP Assign failed");
+        return false;
+    }
+    
+
+    lvgl_lock(LVGL_LOCK_WAIT_TIME);
+    lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lvgl_unlock();
+
+
+    return true;
+}
+
+    // ===== MQTT =====
+
+    //helper function
+    bool request_all_shared_attributes(void) {
+        cJSON *root = cJSON_CreateObject();
+        bool result = false;
+
+        if (!root) {
+            ESP_LOGE("ATTR_REQ", "Failed to create JSON object");
+            return false;
+        }
+
+        cJSON_AddStringToObject(root, "sharedKeys",
+            "AuxTankMax,AuxTankRange,ExtTankMax,ExtTankRange,FillTime,PurgeTime,SleepTimeout,MinDEFLevel");
+
+        char *json_str = cJSON_PrintUnformatted(root);
+        if (json_str) {
+            ESP_LOGI("ATTR_REQ", "Requesting shared attributes: %s", json_str);
+            result = sim7600_mqtt_publish(MQTT_ATTR_REQUEST, json_str);  // This should return bool
+            free(json_str);
+        } else {
+            ESP_LOGE("ATTR_REQ", "Failed to serialize JSON");
+        }
+
+        cJSON_Delete(root);
+        return result;
+    }
+
+
+
+    //Setup
+    bool sim7600_mqtt_cmqtt_setup(const char *broker, uint16_t port,
+                                const char *client_id, const char *user, const char *pass) {
+        char cmd[256];
+        const char *resp;
+
+        ESP_LOGI(TAG, "🚀 Starting MQTT service...");
+        resp = send_at_command("AT+CMQTTSTART", 5000);
+        if (!resp || !strstr(resp, "OK")) {
+            ESP_LOGE(TAG, "❌ MQTT start failed");
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        ESP_LOGI(TAG, "🆔 Acquiring client...");
+        snprintf(cmd, sizeof(cmd), "AT+CMQTTACCQ=0,\"%s\"", client_id);
+        resp = send_at_command(cmd, 5000);
+        if (!resp || !strstr(resp, "OK")) {
+            ESP_LOGE(TAG, "❌ Client acquisition failed");
+            return false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(300));
+        
+        
+        //send_at_command("AT+CGMR");
+        
+        ESP_LOGI(TAG, "🌐 Connecting to broker %s:%d...", broker, port);
+        snprintf(cmd, sizeof(cmd), "AT+CMQTTCONNECT=0,\"tcp://%s:%d\",60,1,\"%s\",\"%s\"", broker, port, user, pass);
+        resp = send_at_command(cmd,5000);
+        if (!resp || !strstr(resp, "OK")) {
+            ESP_LOGE(TAG, "❌ MQTT connect failed");
+            return false;
+        }
+        //ESP_LOGI(TAG, "%s", resp);
+        ESP_LOGI(TAG, "✅ MQTT connected to ThingsBoard");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+
+        
+        //Subscribe to telemetry attributes
+        bool success = true;
+
+        if (!sim7600_mqtt_subscribe(MQTT_ATRR_SUBSCRIBE, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to ATTR_SUBSCRIBE");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (!sim7600_mqtt_subscribe(MQTT_RPC_REQUEST, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to RPC_REQUEST");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (!sim7600_mqtt_subscribe(MQTT_ATTR_RESPONSE, 1)) {
+            ESP_LOGE("MQTT", "Failed to subscribe to ATTR_RESPONSE");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (!request_all_shared_attributes()) {
+            ESP_LOGE("MQTT", "Failed to request shared attributes");
+            success = false;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (!success) {
+            ESP_LOGE("MQTT", "One or more MQTT setup steps failed — restarting ESP");
+            vTaskDelay(2000 / portTICK_PERIOD_MS); // small delay before reset (optional)
+            esp_restart();
+        }
+        
+        xEventGroupSetBits(systemEvents, MQTT_INIT);
+        
+
+        lvgl_lock(LVGL_LOCK_WAIT_TIME);
+        lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lvgl_unlock();
+        
+        return true;
+    }
+
+
+    
+    
+
+    //Subscribe
+    bool sim7600_mqtt_subscribe(const char *topic, int qos) {
+    char cmd[64];
+    const char *resp;
+    int topic_len = strlen(topic);
+
+    
+
+    ESP_LOGI(TAG, "🔔 Subscribing to topic: %s (len=%d)", topic, topic_len);
+
+    snprintf(cmd, sizeof(cmd), "AT+CMQTTSUBTOPIC=0,%d,%d", topic_len, qos);
+    resp = send_at_command(cmd, 5000);
+
+    if (!resp) {
+        ESP_LOGE(TAG, "❌ No response from CMQTTSUBTOPIC");
+        return false;
+    }
+
+    if (strstr(resp, "ERROR")) {
+        ESP_LOGE(TAG, "❌ CMQTTSUBTOPIC returned ERROR: %s", resp);
+        return false;
+    }
+
+    // Some firmwares don't show '>' but immediately expect topic data
+    if (!strstr(resp, ">") && !strstr(resp, "OK")) {
+        ESP_LOGW(TAG, "⚠️ Unexpected CMQTTSUBTOPIC response: %s", resp);
+        return false;
+    }
+
+    // Send topic if '>' prompt expected
+    if (strstr(resp, ">")) {
+        send_raw_uart_data(topic);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    resp = send_at_command("AT+CMQTTSUB=0", 5000);
+    if (!resp || !strstr(resp, "OK")) {
+        ESP_LOGE(TAG, "❌ Subscribe command failed: %s", resp ? resp : "NULL");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "✅ Subscribed to topic");
+    return true;
+}
+
+
+    //Publish Function
+    bool sim7600_mqtt_publish(const char *topic, const char *payload) {
+        if (!xSemaphoreTake(publish_mutex, pdMS_TO_TICKS(10000))) {
+        ESP_LOGW(TAG, "Timeout waiting for publish mutex");
+        return false;
+    }
+        char cmd[128];
+        const char *resp;
+
+        // Flush UART input to avoid stale junk
+        uart_flush_input(SIM7600_UART_PORT);
+        vTaskDelay(pdMS_TO_TICKS(50));
+
+        // Step 1: Set topic
+        snprintf(cmd, sizeof(cmd), "AT+CMQTTTOPIC=0,%d", strlen(topic));
+        resp = send_at_command(cmd, 10000);
+        if (!resp || !strstr(resp, ">")) {
+            ESP_LOGE(TAG, "❌ Failed to set topic");
+            //esp_restart(); // Restart if failed to set topic
+            xSemaphoreGive(publish_mutex);
+            return false;
+        }
+
+        
+        send_raw_uart_data(topic);
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // Step 2: Set payload
+        snprintf(cmd, sizeof(cmd), "AT+CMQTTPAYLOAD=0,%d", strlen(payload));
+        resp = send_at_command(cmd, 5000);
+        if (!resp || !strstr(resp, ">")) {
+            ESP_LOGE(TAG, "❌ Failed to set payload");
+            xSemaphoreGive(publish_mutex);
+            return false;
+        }
+
+        
+        send_raw_uart_data(payload);
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        // Step 3: Publish
+        resp = send_at_command("AT+CMQTTPUB=0,1,60", 10000);
+        if (resp && strstr(resp, "OK")) {
+            ESP_LOGI(TAG, "✅ Published %s to topic: %s", payload, topic);
+            vTaskDelay(200 / portTICK_PERIOD_MS); // Allow time for publish to complete
+            xSemaphoreGive(publish_mutex);
+            return true;
+        } else {
+            ESP_LOGE(TAG, "❌ Publish failed");
+            xSemaphoreGive(publish_mutex);
+            return false;
+        }
+        
+    }
+
+// ===== Modem Functions =====
+
+
+    void modem_update_signal_quality(void) {
+        
+        
+        const char *resp = send_at_command("AT+CSQ", 5000);
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Allow time for response to be processed
+        
+
+        if (!resp) {
+            ESP_LOGW(TAG, "⚠️ No response to AT+CSQ");
+            return;
+        }
+
+        const char *csq = strstr(resp, "+CSQ:");
+        if (!csq) {
+            ESP_LOGW(TAG, "⚠️ +CSQ not found in response");
+            return;
+        }
+
+        int rssi = 0, ber = 0;
+        if (sscanf(csq, "+CSQ: %d,%d", &rssi, &ber) != 2) {
+            ESP_LOGW(TAG, "⚠️ Failed to parse CSQ response");
+            return;
+        }
+
+        // Update your global or shared telemetry structure
+        shared_sensor_data.csq = rssi;
+
+        ESP_LOGI(TAG, "📶 Signal updated: RSSI = %d, BER = %d", rssi, ber);
+    }
+
+
+
+
+
+// ===== Main Task =====
 
 void modem_task(void *param) {
+    sim7600_init();
 
-    //power on modem
-    //sim800l_power_on();
-    //vTaskDelay(1000 / portTICK_PERIOD_MS);
-    
-    // send_at_command_test("AT");
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    if (!sim7080_wait_for_sim_and_signal(500, 3000)) {
+        ESP_LOGE(TAG, "Network discovery failed");
+        esp_restart(); // Restart if SIM or signal not ready
+    }
 
+    if (!sim7600_network_init()) {
+        ESP_LOGE(TAG, "Network init failed");
+        esp_restart(); // Restart if network init failed
+    }
 
-    // ESP_LOGI(TAG, "Connecting to the internet");
-    // connect_to_internet(APN, USER, PASS);
-    // xEventGroupSetBits(systemEvents, MODEM_GPRS_CON);
-    // ESP_LOGW(TAG, "Signalled modem connected");
-
-    
-    // send_sms("07852709248", "Hello World! v3");
-    // ESP_LOGW(TAG, "SMS sent");
-
-
-    // vTaskDelay(10000 / portTICK_PERIOD_MS);
-
-    //read_sms();
 
     
-    while(1){
+    if (!sim7600_mqtt_cmqtt_setup(MQTT_BROKER, MQTT_PORT, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
+        ESP_LOGE(TAG, "MQTT connection failed");
+        esp_restart(); // Restart if MQTT connection failed
+    }
 
-    
-    vTaskDelay(pdMS_TO_TICKS(100)); // Add delay to avoid busy looping
+
+    while (1) {
+
+        
+        vTaskDelay(pdMS_TO_TICKS(180000));
+        uart_flush(UART_NUM_2);
+
+        modem_update_signal_quality(); 
+
+        
     }
 }
+
+

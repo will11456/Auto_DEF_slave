@@ -1,6 +1,5 @@
-
-#ifndef PUBLISH_H
-#define PUBLISH_H
+#ifndef GNSS_H
+#define GNSS_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,11 +19,24 @@
 #include "mqtt_client.h"
 #include "esp_modem_api.h"
 #include "sdkconfig.h"
+#include <time.h>
 
 
-void publish_data(void);
+typedef struct {
+    float latitude;
+    float longitude;
+    float altitude;
+    char timestamp[32];  // Unix timestamp of the last fix
+} GNSSLocation;
 
-// Function prototype for the publish task
-void publish_task(void *pvParameter);
 
-#endif // PUBLISH_H
+extern GNSSLocation shared_gnss_data;
+extern SemaphoreHandle_t gnss_mutex;
+
+bool gnss_power_on(void);
+bool gnss_power_off(void);
+bool gnss_get_location(GNSSLocation *loc);
+void gnss_task(void *param);
+
+
+#endif

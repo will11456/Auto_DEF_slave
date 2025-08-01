@@ -1,3 +1,4 @@
+#include "esp_log.h"
 #include "freertos/idf_additions.h"
 #include "pin_map.h"
 #include "main.h"
@@ -6,265 +7,386 @@
 #include "uart.h"
 #include "data.h"
 #include "mqtt.h"
+#include "gnss.h"
+#include "main.h"
+#include "message_ids.h"
 #include "publish.h"
 
+#include <string.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "esp_system.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
 
-#define UART_NUM UART_NUM_2
+#define MQTT_CLIENT_IDX         0
 
-
-#define MQTT_USER   "07ac444748e9232b"
-#define MQTT_PASS   "7ho0anm3u0q0pa1pgwsxu53nw1xqboi9"
-
-#define BROKER_URL  "mqtt://mqtt.akenza.io"     
-#define BROKER_PORT 1883
-
-const char* root_ca = CA_CERT;
-
-extern TaskHandle_t mqttTaskHandle; //externally refernced task handle
-
-static const char* TAG = "MQTT";
-
-esp_mqtt_client_handle_t mqtt_client;
-
-static EventGroupHandle_t event_group = NULL;
-static const int CONNECT_BIT = BIT0;
-static const int GOT_DATA_BIT = BIT2;
-static const int DISCONNECTED_BIT = BIT3;
+#define TOPIC_ATTR_UPDATES      "v1/devices/me/attributes"
+#define TOPIC_RPC_REQUEST_BASE  "v1/devices/me/rpc/request/"
+#define TOPIC_ATTR_REQUEST_BASE "v1/devices/me/attributes/response/1"
 
 
-/////////////CONFIG///////////////
-#define ESP_MODEM_CONFIG() \
-    {                                  \
-        .dte_buffer_size = 512,        \
-        .task_stack_size = 4096,       \
-        .task_priority = 5,            \
-        .uart_config = {               \
-            .port_num = UART_NUM,                 \
-            .data_bits = UART_DATA_8_BITS,          \
-            .stop_bits = UART_STOP_BITS_1,          \
-            .parity = UART_PARITY_DISABLE,          \
-            .flow_control = ESP_MODEM_FLOW_CONTROL_NONE,\
-            .source_clk = ESP_MODEM_DEFAULT_UART_CLK,   \
-            .baud_rate = 115200,                    \
-            .tx_io_num = 34,                        \
-            .rx_io_num = 35,                        \
-            .rts_io_num = 27,                       \
-            .cts_io_num = 23,                       \
-            .rx_buffer_size = 4096,                 \
-            .tx_buffer_size = 512,                  \
-            .event_queue_size = 30,                 \
-       },                                           \
+
+static const char *TAG = "MQTT";
+
+
+// Entry point: called from URC handler when +QMTRECV lines arrive
+void mqtt_handle_urc(const char *urc) {
+    static bool in_mqtt_block = false;
+    static char current_topic[128] = {0};
+    static char current_payload[512] = {0};
+
+    ESP_LOGI(TAG, "Received URC: %s", urc);
+
+    // Start of MQTT RX block
+    if (strstr(urc, "+CMQTTRXSTART:")) {
+        in_mqtt_block = true;
+        current_topic[0] = '\0';
+        current_payload[0] = '\0';
+        return;
     }
 
-typedef struct esp_modem_dte_config esp_modem_dte_config_t;
-
-
-/////////////////FUNCTIONS //////////////////////////////////
-
-
-
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
-{
-    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIu32, base, event_id);
-    esp_mqtt_event_handle_t event = event_data;
-    esp_mqtt_client_handle_t client = event->client;
-    int msg_id;
-    switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        xEventGroupSetBits(event_group, DISCONNECTED_BIT);
-        break;
-
-    case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
-        xEventGroupSetBits(event_group, GOT_DATA_BIT);
-        break;
-    case MQTT_EVENT_ERROR:
-        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        break;
-    default:
-        ESP_LOGI(TAG, "MQTT other event id: %d", event->event_id);
-        break;
+    // Topic line (actual topic follows +CMQTTRXTOPIC)
+    if (in_mqtt_block && strstr(urc, "+CMQTTRXTOPIC:")) {
+        // Next line will contain the topic
+        return;
     }
-}
 
-static void on_ppp_changed(void *arg, esp_event_base_t event_base,
-                           int32_t event_id, void *event_data)
-{
-    ESP_LOGI(TAG, "PPP state changed event %" PRIu32, event_id);
-    if (event_id == NETIF_PPP_ERRORUSER) {
-        /* User interrupted event from esp-netif */
-        esp_netif_t **p_netif = event_data;
-        ESP_LOGI(TAG, "User interrupted event from netif:%p", *p_netif);
+    // Payload line (after +CMQTTRXPAYLOAD)
+    if (in_mqtt_block && strstr(urc, "+CMQTTRXPAYLOAD:")) {
+        // Next line will contain JSON payload
+        return;
     }
-}
 
+    // End of MQTT RX block
+    if (strstr(urc, "+CMQTTRXEND:")) {
+        in_mqtt_block = false;
 
-static void on_ip_event(void *arg, esp_event_base_t event_base,
-                        int32_t event_id, void *event_data)
-{
-    ESP_LOGD(TAG, "IP event! %" PRIu32, event_id);
-    if (event_id == IP_EVENT_PPP_GOT_IP) {
-        esp_netif_dns_info_t dns_info;
-
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        esp_netif_t *netif = event->esp_netif;
-
-        ESP_LOGI(TAG, "Modem Connect to PPP Server");
-        ESP_LOGI(TAG, "~~~~~~~~~~~~~~");
-        ESP_LOGI(TAG, "IP          : " IPSTR, IP2STR(&event->ip_info.ip));
-        ESP_LOGI(TAG, "Netmask     : " IPSTR, IP2STR(&event->ip_info.netmask));
-        ESP_LOGI(TAG, "Gateway     : " IPSTR, IP2STR(&event->ip_info.gw));
-        esp_netif_get_dns_info(netif, 0, &dns_info);
-        ESP_LOGI(TAG, "Name Server1: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
-        esp_netif_get_dns_info(netif, 1, &dns_info);
-        ESP_LOGI(TAG, "Name Server2: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
-        ESP_LOGI(TAG, "~~~~~~~~~~~~~~");
-        xEventGroupSetBits(event_group, CONNECT_BIT);
-
-        ESP_LOGI(TAG, "GOT ip event!!!");
-    } else if (event_id == IP_EVENT_PPP_LOST_IP) {
-        ESP_LOGI(TAG, "Modem Disconnect from PPP Server");
-    } else if (event_id == IP_EVENT_GOT_IP6) {
-        ESP_LOGI(TAG, "GOT IPv6 event!");
-
-        ip_event_got_ip6_t *event = (ip_event_got_ip6_t *)event_data;
-        ESP_LOGI(TAG, "Got IPv6 address " IPV6STR, IPV62STR(event->ip6_info.ip));
-    }
-}
-
-
-void mqtt_task(void *param){ 
-
-    ESP_LOGW(TAG, "MQTT task started");
-
-    /* Init and register system/core components */
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, &on_ip_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, &on_ppp_changed, NULL));
-
-    /* Configure the PPP netif */
-    esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(APN);
-    esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
-    esp_netif_t *esp_netif = esp_netif_new(&netif_ppp_config);
-    assert(esp_netif);
-
-    event_group = xEventGroupCreate();
-
-    /* Configure the DTE */
-    esp_modem_dte_config_t dte_config = ESP_MODEM_CONFIG();
-    
-    ESP_LOGW(TAG, "Initializing esp_modem for the SIM800 module...");
-    esp_modem_dce_t *dce = esp_modem_new_dev(ESP_MODEM_DCE_SIM800, &dte_config, &dce_config, esp_netif);
-    assert(dce);
-
-    vTaskDelay(8000 / portTICK_PERIOD_MS);
-
-    esp_err_t err;
-    
-
-        while (1) {
-
-            // Put modem in data mode
-            err = esp_modem_set_mode(dce, ESP_MODEM_MODE_DATA);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "esp_modem_set_mode(ESP_MODEM_MODE_DATA) failed with %d", err);
-                ESP_LOGE(TAG, "No SIM?");
-            }
-
-            /* Wait for IP address with a timeout of 1 minute */
-            ESP_LOGI(TAG, "Waiting for IP address");
-            // Update GSM text colour
-            lvgl_lock(LVGL_LOCK_WAIT_TIME);
-            lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lvgl_unlock();
-
-            EventBits_t bits = xEventGroupWaitBits(event_group, CONNECT_BIT, pdTRUE, pdFALSE, 60000 / portTICK_PERIOD_MS);
-
-            if (bits & CONNECT_BIT) {
-                // IP Acquired
-                ESP_LOGW(TAG, "IP ACQUIRED");
-
-                // Update GSM text colour
-                lvgl_lock(LVGL_LOCK_WAIT_TIME);
-                lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x00FF00), LV_PART_MAIN | LV_STATE_DEFAULT);
-                lvgl_unlock();
-
-                /* Config MQTT */
-                esp_mqtt_client_config_t mqtt_config = {
-                    .broker.address.uri = BROKER_URL,
-                    .broker.address.port = BROKER_PORT,
-                    .credentials.username = MQTT_USER, 
-                    .credentials.authentication.password = MQTT_PASS
-                };
-
-                mqtt_client = esp_mqtt_client_init(&mqtt_config);
-                esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-                esp_mqtt_client_start(mqtt_client);
-                xEventGroupSetBits(systemEvents, MQTT_INIT);
-
-                while(1){
-
-                    ESP_LOGW(TAG, "Connected! Waiting for disconnection...");
-                    EventBits_t bits = xEventGroupWaitBits(event_group, DISCONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-                    //indicate mqtt no longer up
-                    xEventGroupClearBits(systemEvents, MQTT_INIT);
-
-                    ESP_LOGW(TAG, "Disconnected! restarting modem routine");
-
-                    //clear mqtt
-                    esp_mqtt_client_stop(mqtt_client);
-                    esp_mqtt_client_destroy(mqtt_client);
-                    break;
-                }
-                
+        // Classify and dispatch
+        if (strlen(current_topic) > 0 && strlen(current_payload) > 0) {
+            if (strcmp(current_topic, TOPIC_ATTR_UPDATES) == 0) {
+                handle_shared_attributes(current_payload);
             } 
-            // IP not acquired, restart modem
-            ESP_LOGW(TAG, "IP not acquired, restarting modem...");
-            esp_modem_destroy(dce);
-            esp_netif_destroy(esp_netif);
-
-            // Update GSM text colour
-            lvgl_lock(LVGL_LOCK_WAIT_TIME);
-            lv_obj_set_style_text_color(ui_GSMTextArea, lv_color_hex(0x40E0D0), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lvgl_unlock();
-
-            sim800l_power_off();
-            vTaskDelay(1000 / portTICK_PERIOD_MS); // Wait before trying again
-            sim800l_power_on();
-
-            vTaskDelay(10000 / portTICK_PERIOD_MS); // Wait before trying again
-
-
-            /* Reinitialize modem and netif */
-            esp_netif = esp_netif_new(&netif_ppp_config);
-            assert(esp_netif);
-            dce = esp_modem_new_dev(ESP_MODEM_DCE_SIM800, &dte_config, &dce_config, esp_netif);
-            assert(dce);
-
+            else if (strncmp(current_topic, TOPIC_RPC_REQUEST_BASE,
+                               strlen(TOPIC_RPC_REQUEST_BASE)) == 0) {
+                handle_rpc_request(current_topic, current_payload);
+            } 
+            else if (strncmp(current_topic, TOPIC_ATTR_REQUEST_BASE,
+                                strlen(TOPIC_ATTR_REQUEST_BASE)) == 0) {
+                handle_shared_attributes(current_payload);
+            }
             
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            else {
+                ESP_LOGW(TAG, "Unhandled topic: %s with payload: %s",
+                         current_topic, current_payload);
+            }
+        }
+        return;
+    }
 
-                
+    // If we're inside a message block but this line is not a header, it's data
+    if (in_mqtt_block) {
+        if (current_topic[0] == '\0') {
+            // First data line after +CMQTTRXTOPIC is the topic
+            strncpy(current_topic, urc, sizeof(current_topic) - 1);
+        } else if (current_payload[0] == '\0' && strchr(urc, '{')) {
+            // First line containing '{' after +CMQTTRXPAYLOAD is payload
+            strncpy(current_payload, urc, sizeof(current_payload) - 1);
+        }
+    }
+}
 
-            
+
+// Parse shared attributes JSON and store floats (2dp) in NVS
+void handle_shared_attributes(const char *json) {
+    ESP_LOGI(TAG, "Handling shared attributes: %s", json);
+
+    cJSON *root = cJSON_Parse(json);
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse shared attributes JSON");
+        return;
+    }
+
+   
+
+    cJSON *container = cJSON_GetObjectItem(root, "shared");
+    if (!cJSON_IsObject(container)) {
+        container = root;  // fallback to root if not wrapped
+    }
+
+
+    nvs_handle_t h;
+    if (nvs_open(NS_ATTR, NVS_READWRITE, &h) == ESP_OK) {
+        cJSON *item;
+        float float_val;
+        int int_val;
+
+        // AUX_RANGE
+        item = cJSON_GetObjectItem(container, KEY_AUX_RANGE);
+        if (cJSON_IsNumber(item)) {
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_RANGE = %.2f", float_val);
+            nvs_set_blob(h, KEY_AUX_RANGE, &float_val, sizeof(float_val));
+        } else {
+            ESP_LOGI(TAG, "KEY_AUX_RANGE not found in JSON");
         }
 
+        // AUX_MAX
+        item = cJSON_GetObjectItem(container, KEY_AUX_MAX);
+        if (cJSON_IsNumber(item)) {
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_AUX_MAX = %.2f", float_val);
+            nvs_set_blob(h, KEY_AUX_MAX, &float_val, sizeof(float_val));
+        } else {
+            ESP_LOGI(TAG, "KEY_AUX_MAX not found in JSON");
+        }
+
+        // EXT_RANGE
+        item = cJSON_GetObjectItem(container, KEY_EXT_RANGE);
+        if (cJSON_IsNumber(item)) {
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_RANGE = %.2f", float_val);
+            nvs_set_blob(h, KEY_EXT_RANGE, &float_val, sizeof(float_val));
+        } else {
+            ESP_LOGI(TAG, "KEY_EXT_RANGE not found in JSON");
+        }
+
+        // EXT_MAX
+        item = cJSON_GetObjectItem(container, KEY_EXT_MAX);
+        if (cJSON_IsNumber(item)) {
+            float_val = (float)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_EXT_MAX = %.2f", float_val);
+            nvs_set_blob(h, KEY_EXT_MAX, &float_val, sizeof(float_val));
+        } else {
+            ESP_LOGI(TAG, "KEY_EXT_MAX not found in JSON");
+        }
+
+        // Fill time (int)
+        item = cJSON_GetObjectItem(container, KEY_FILL_TIME);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_FILL_TIME = %d", int_val);
+            nvs_set_i32(h, KEY_FILL_TIME, int_val);
+        }
+
+        // Purge time (int)
+        item = cJSON_GetObjectItem(container, KEY_PURGE_TIME);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_PURGE_TIME = %d", int_val);
+            nvs_set_i32(h, KEY_PURGE_TIME, int_val);
+        }
+
+        // Sleep timeout (int)
+        item = cJSON_GetObjectItem(container, KEY_SLEEP_TIMEOUT);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_SLEEP_TIMEOUT = %d", int_val);
+            nvs_set_i32(h, KEY_SLEEP_TIMEOUT, int_val);
+        }
+
+        // Min DEF Level (int)
+        item = cJSON_GetObjectItem(container, KEY_MIN_DEF_LEVEL);
+        if (cJSON_IsNumber(item)) {
+            int_val = (int)item->valuedouble;
+            ESP_LOGI(TAG, "KEY_MIN_DEF_LEVEL = %d", int_val);
+            nvs_set_i32(h, KEY_MIN_DEF_LEVEL, int_val);
+        }
+
+        // Commit changes to NVS
+        nvs_commit(h);
+        nvs_close(h);
+
+        // Retrieve integer values after saving
+        int fillTime = 0, purgeTime = 0, sleepTimeout = 0, minDEFLevel = 0;
+        if (nvs_open(NS_ATTR, NVS_READONLY, &h) == ESP_OK) {
+            nvs_get_i32(h, KEY_FILL_TIME, &fillTime);
+            nvs_get_i32(h, KEY_PURGE_TIME, &purgeTime);
+            nvs_get_i32(h, KEY_SLEEP_TIMEOUT, &sleepTimeout);
+            nvs_get_i32(h, KEY_MIN_DEF_LEVEL, &minDEFLevel);
+        } else {
+            ESP_LOGW(TAG, "Failed to open NVS for reading");
+        }
+        
+
+        // Send the values in data0–data3
+        ESP_LOGI(TAG, "Sending updated system message with fillTime: %d, purgeTime: %d, sleepTimeout: %d, minDEFLevel: %d",
+                 fillTime, purgeTime, sleepTimeout, minDEFLevel);
+        send_message(MSG_ID_SETTINGS, MSG_TYPE_DATA, (uint16_t)fillTime, (uint16_t)purgeTime, (uint16_t)sleepTimeout, (uint16_t)minDEFLevel);
+        publish_data();
+
+        
+    } else {
+        ESP_LOGW(TAG, "Failed to open NVS namespace: %s", NS_ATTR);
+    }
+    cJSON_Delete(root);
+}
+
+
+// Handle RPC calls (button controls) without NVS persistence
+void handle_rpc_request(const char *topic, const char *json) {
+    const char *req_id = strrchr(topic, '/');
+    if (!req_id) return;
+    req_id++;
+
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return;
+    cJSON *method = cJSON_GetObjectItem(root, "method");
+    cJSON *params = cJSON_GetObjectItem(root, "params");
+
+    cJSON *result = cJSON_CreateObject();
+    bool success = false;
+
+    if (cJSON_IsString(method)) {
+        const char *method_str = method->valuestring;
+        ESP_LOGI("RPC", "Received method: %s", method_str);
+
+        if (strcmp(method_str, "Run") == 0) {
+            // Handle "run"
+            ESP_LOGI("RPC", "Handling RUN command");
+            handle_run();
+            success = true;
+
+        } else if (strcmp(method_str, "Stop") == 0) {
+            // Handle "stop"
+            ESP_LOGI("RPC", "Handling STOP command");
+            handle_stop();
+            success = true;
+
+        } else if (strcmp(method_str, "Reboot") == 0) {
+            // Handle "stop"
+            ESP_LOGI("RPC", "Handling STOP command");
+            handle_reboot();
+            success = true;
+
+        } else {
+            ESP_LOGW("RPC", "Unknown RPC method: %s", method_str);
+            cJSON_AddStringToObject(result, "error", "unknown method");
+        }
+    } else {
+        cJSON_AddStringToObject(result, "error", "invalid or missing method");
     }
 
+    cJSON_AddBoolToObject(result, "success", success);
+    //send_rpc_response(req_id, result);
 
+    
+    cJSON_Delete(result);
+    cJSON_Delete(root);
+}
+
+
+
+
+
+
+
+
+//Function to retrieve values from flash
+esp_err_t mqtt_get_aux_range(float *out_val) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS_ATTR, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    size_t required_size = sizeof(float);
+    err = nvs_get_blob(h, KEY_AUX_RANGE, out_val, &required_size);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t mqtt_get_aux_max(float *out_val) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS_ATTR, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    size_t required_size = sizeof(float);
+    err = nvs_get_blob(h, KEY_AUX_MAX, out_val, &required_size);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t mqtt_get_ext_range(float *out_val) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS_ATTR, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    size_t required_size = sizeof(float);
+    err = nvs_get_blob(h, KEY_EXT_RANGE, out_val, &required_size);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t mqtt_get_ext_max(float *out_val) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS_ATTR, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    size_t required_size = sizeof(float);
+    err = nvs_get_blob(h, KEY_EXT_MAX, out_val, &required_size);
+    nvs_close(h);
+    return err;
+}
+
+///////////////message sending//////////////
+void int_to_hex_str(unsigned int num, char *str, int str_size) {
+    snprintf(str, str_size, "%04X", num);
+}
+
+void send_message(int message_id, int message_type, uint16_t data0, uint16_t data1, uint16_t data2, uint16_t data3) {
+    // Temporary buffers
+    char output_buffer[23];  // 1 byte for type + 4 bytes for each data field + null terminator
+    char message_id_str[5];  // 4 characters for 2 bytes in hex + null terminator
+    char data_type = message_type ? '1' : '0';
+
+    // Convert the message ID to a hex string
+    int_to_hex_str(message_id, message_id_str, sizeof(message_id_str));
+
+    // Format the message
+    snprintf(output_buffer, 23, "%c%s#%04X%04X%04X%04X",
+             data_type, message_id_str,
+             data0, data1, data2, data3);
+
+    if (xQueueSend(master_cmd_queue, output_buffer, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE("UART_SEND", "Failed to send message to queue");
+    }
+}
+
+
+
+
+
+
+
+
+void handle_run(void) {
+    ESP_LOGW(TAG, "Run command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, RUN , 0, 0, 0);
+    ESP_LOGI(TAG, "Run command sent to master");
+}
+
+void handle_stop(void) {
+    ESP_LOGW(TAG, "Stop command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, STOP , 0, 0, 0);
+    ESP_LOGI(TAG, "Stop command sent to master");
+}
+
+
+void handle_reboot(void) {
+    ESP_LOGW(TAG, "Reboot command received");
+    send_message(MSG_ID_SYSTEM, MSG_TYPE_COMMAND, RESET , 0, 0, 0);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);  // Delay to ensure message is sent
+    esp_restart();  // Restart the ESP32
+    ESP_LOGI(TAG, "Reboot command sent to master");
+}
+
+
+
+void mqtt_urc_task(void *param) {
+    char line[SIM7600_UART_BUF_SIZE];
+
+    ESP_LOGI("MQTT_URC", "MQTT URC task started");
+
+    while (1) {
+        // Block until a line is received from the queue
+        if (xQueueReceive(incoming_queue, &line, portMAX_DELAY) == pdTRUE) {
+            mqtt_handle_urc(line);
+        }
+    }
+}

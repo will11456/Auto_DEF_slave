@@ -18,7 +18,7 @@
 
 #include "../managed_components\lvgl__lvgl\src\hal\lv_hal_disp.h"
 
-#define DISP_BUF_SIZE 12800
+#define DISP_BUF_SIZE (320*40)
 
 static const char *TAG = "DISPLAY";
 
@@ -101,6 +101,7 @@ void run_display_task(void *pvParameter)
     disp_drv.hor_res = 320;
     disp_drv.ver_res = 240;
     disp_drv.antialiasing = 1;
+    //disp_drv.full_refresh = 1;
     //disp_drv.rotated = 0;
     
 
@@ -130,8 +131,29 @@ void run_display_task(void *pvParameter)
         lvgl_unlock();
     }
     
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+   
+    // Call this immediately after unlocking from ui_init()
+    vTaskDelay(pdMS_TO_TICKS(10));  // Give LVGL 1 frame
+    if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
+    {
+        lv_timer_handler();  // Force first render
+        lvgl_unlock();
+    }
     
-    
+    // Wait 5 secs for splash
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
+    {
+        lv_scr_load_anim(ui_DataScreen,               // Target screen
+                        LV_SCR_LOAD_ANIM_MOVE_LEFT,    // Animation type
+                        1000,                         // Duration (ms)
+                        0,                           // Delay
+                        false);                      // Don't delete old screen (optional)
+        lvgl_unlock();
+    }
 
 
 
@@ -143,7 +165,7 @@ void run_display_task(void *pvParameter)
         // we must lock our lvgl instance before we try and use it
         if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
         {
-            lv_task_handler();
+            lv_timer_handler();
             lvgl_unlock();
          }
     }

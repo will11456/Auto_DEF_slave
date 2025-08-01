@@ -22,11 +22,20 @@ typedef struct {
     
     float int_tank;
     float ext_tank;
-    float fuel_tank;
+    float aux_tank;
     float batt_volt;
     float temp;
+    float pres;
+    float rh;
+    float pt1000;
+    uint16_t csq;
+    bool  can_status;
     char status[32];
     char mode[32];
+    bool out1;
+    bool out2;
+    bool npn1;
+    bool npn2;
 
 
 } sensor_data_t;
@@ -61,9 +70,9 @@ void handle_message(const DecodedMessage *decoded_msg);
 // Handle Functions
 void handle_bme280_message(const DecodedMessage *decoded_msg);
 void handle_tank_message(const DecodedMessage *decoded_msg);
-void handle_pump_message(const DecodedMessage *decoded_msg);
+void handle_mode_message(const DecodedMessage *decoded_msg);
 void handle_comms_message(const DecodedMessage *decoded_msg);
-void handle_24v_out_message(const DecodedMessage *decoded_msg);
+void handle_outputs_message(const DecodedMessage *decoded_msg);
 void handle_batt_message(const DecodedMessage *decoded_msg);
 void handle_analog_out_message(const DecodedMessage *decoded_msg);
 void handle_420_inputs_message(const DecodedMessage *decoded_msg);

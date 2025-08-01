@@ -1,3 +1,4 @@
+#include "message_ids.h"
 #include "pin_map.h"
 #include "main.h"
 #include "modem.h"
@@ -13,9 +14,7 @@ static const char *TAG = "HEARTBEAT";
 
 void send_heartbeat(void){
 
-    uint8_t init_msg[16] = {0};
-    int txBytes = uart_write_bytes(UART_NUM_1, (const char *)init_msg, sizeof(init_msg));
-    //ESP_LOGW(TAG, "Sent HEARTBEAT");
+    send_message(MSG_ID_HEARTBEAT, MSG_TYPE_COMMAND, 0, 0, 0, 0);
 
 }
 

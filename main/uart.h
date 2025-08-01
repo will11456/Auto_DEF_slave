@@ -16,12 +16,16 @@
 #define UART_NUM UART_NUM_1
 #define UART_BUF_SIZE (2048)
 
+#define MASTER_MSG_SIZE 23
+
 
 // Function to initialize UART with specified parameters
 void uart_init(void);
 
 // Task function for receiving UART messages in a FreeRTOS task
 // This function should be passed to xTaskCreate to run the UART receive task
-void uart_task(void *param);
+void master_rx_task(void *param);
+void master_tx_task(void *param);
+
 
 #endif // UART_H

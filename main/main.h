@@ -12,12 +12,16 @@
 #include <esp_log.h>
 #include "esp_system.h"
 #include "lvgl.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "esp_system.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
 
 
-// Constants
-#define APN      "wap.vodafone.co.uk"
-#define USER     "wap"
-#define PASS     "wap"
+
 
 
 //event handlers
