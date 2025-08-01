@@ -282,7 +282,7 @@ bool sim7600_wait_for_ip(int timeout_ms) {
                     strncpy(ip, ptr, end - ptr);
                     ip[end - ptr] = '\0';
 
-                    if (strcmp(ip, "0.0.0.0") != 0) {
+                    if (strcmp(ip, "0.0.0.0") != 0 && strlen(ip) > 0) {
                         ESP_LOGI(TAG, "✅ IP assigned: %s", ip);
                         return true;
                     } else {
@@ -337,6 +337,9 @@ bool sim7600_network_init(void) {
 
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
+    
+    send_at_command("AT+CNMP=38", 2000);  // 38 = LTE only, int timeout_ms)
+    send_at_command("AT+CMNB=3", 2000);    // Set LTE-only preference
     
     send_at_command("AT+CMEE=2", 3000);
     send_at_command("AT+CGATT=1", 20000);
