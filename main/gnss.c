@@ -67,22 +67,24 @@ static bool parse_gpsinfo_line(const char *line, GNSSLocation *shared_gnss_data)
     return true;
 }
 
-// Extract +CGPSINFO: line from response
 static const char* extract_gpsinfo_line(const char *resp) {
     static char line[256];
     const char *ptr = strstr(resp, "+CGPSINFO:");
     if (!ptr) return NULL;
 
-    const char *end = strstr(ptr, "\r\n");
-    if (!end) return NULL;
+    // Find end of the line
+    const char *end = strpbrk(ptr, "\r\n");
+    if (!end) end = ptr + strlen(ptr);
 
     size_t len = end - ptr;
     if (len >= sizeof(line)) len = sizeof(line) - 1;
 
     strncpy(line, ptr, len);
     line[len] = '\0';
+
     return line;
 }
+
 
 // Power GNSS on
 bool gnss_power_on(void) {
@@ -102,6 +104,8 @@ bool gnss_get_location(GNSSLocation *shared_gnss_data) {
         return false;
     }
 
+    //ESP_LOGI(TAG, "Raw GPS response:\n%s", resp);
+
     const char *line = extract_gpsinfo_line(resp);
     if (!line) {
         ESP_LOGE(TAG, "CGPSINFO line not found");
@@ -118,10 +122,17 @@ void gnss_task(void *param) {
 
     ESP_LOGW(TAG, "GNSS task started");
 
+    if (!xSemaphoreTake(publish_mutex, pdMS_TO_TICKS(10000))) {
+        ESP_LOGW(TAG, "Timeout waiting for publish mutex");
+        esp_restart(); // Restart if mutex not available
+        }
+
     if (!gnss_power_on()) {
         ESP_LOGE(TAG, "GPS failed to power on");
         vTaskDelete(NULL);
     }
+
+    xSemaphoreGive(publish_mutex);
 
     vTaskDelay(pdMS_TO_TICKS(30000));  // Allow GPS to get first fix
 
@@ -129,9 +140,10 @@ void gnss_task(void *param) {
 
     while (1) {
 
-        if (!MODEM_LOCK(3000)) {
-            ESP_LOGW(TAG, "❌ Could not lock modem for GNSS task");
-        }
+         if (!xSemaphoreTake(publish_mutex, pdMS_TO_TICKS(10000))) { //using the publish mutex as a general at send mutex
+            ESP_LOGW(TAG, "Timeout waiting for publish mutex");
+            esp_restart(); // Restart if mutex not available
+            }
 
         if (gnss_get_location(&shared_gnss_data)) {
             ESP_LOGI(TAG, "GPS: Lat %.6f, Lon %.6f, Alt %.2f, Time: %s",
@@ -142,7 +154,7 @@ void gnss_task(void *param) {
         } else {
             ESP_LOGW(TAG, "GPS: No fix or invalid data");
         }
-        MODEM_UNLOCK();
+        xSemaphoreGive(publish_mutex);
 
         vTaskDelay(GNSS_TASK_DELAY *60000/ portTICK_PERIOD_MS);
     }

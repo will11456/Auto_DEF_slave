@@ -168,10 +168,20 @@ void publish_task(void *pvParameter){
         //verify the mqtt is up and running
         xEventGroupWaitBits(systemEvents, MQTT_INIT, pdFALSE, pdFALSE, portMAX_DELAY);
         
+        static int publish_fail_count = 0;  // Persistent between function calls
 
-        sim7600_mqtt_publish(MQTT_TOPIC_PUB, json_string);
-            
-        ESP_LOGW(TAG, "published data!");
+        if (!sim7600_mqtt_publish(MQTT_TOPIC_PUB, json_string)) {
+            publish_fail_count++;
+            ESP_LOGE(TAG, "Publish failed! Count: %d", publish_fail_count);
+
+            if (publish_fail_count >= 5) {
+                ESP_LOGE(TAG, "❌ Publish failed 5 times in a row — restarting ESP");
+                esp_restart();
+            }
+        } else {
+            publish_fail_count = 0;  // Reset counter on success
+            ESP_LOGW(TAG, "Published data!");
+        }
         cJSON_Delete(root);
         free(json_string);
 

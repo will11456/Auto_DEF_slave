@@ -1,3 +1,4 @@
+#include "esp_system.h"
 #include "freertos/idf_additions.h"
 #include "mqtt.h"
 #include "pin_map.h"
@@ -599,7 +600,13 @@ bool sim7600_network_init(void) {
 
     void modem_update_signal_quality(void) {
         
-        
+        if (!xSemaphoreTake(publish_mutex, pdMS_TO_TICKS(10000))) {
+        ESP_LOGW(TAG, "Timeout waiting for publish mutex");
+        esp_restart(); // Restart if mutex not available
+        }
+
+        uart_flush(UART_NUM_2);
+
         const char *resp = send_at_command("AT+CSQ", 5000);
         vTaskDelay(10 / portTICK_PERIOD_MS); // Allow time for response to be processed
         
@@ -625,6 +632,8 @@ bool sim7600_network_init(void) {
         shared_sensor_data.csq = rssi;
 
         ESP_LOGI(TAG, "📶 Signal updated: RSSI = %d, BER = %d", rssi, ber);
+        xSemaphoreGive(publish_mutex);
+
     }
 
 
@@ -656,9 +665,10 @@ void modem_task(void *param) {
 
     while (1) {
 
-        
+         
+
         vTaskDelay(pdMS_TO_TICKS(180000));
-        uart_flush(UART_NUM_2);
+        
 
         modem_update_signal_quality(); 
 
