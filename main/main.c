@@ -91,7 +91,7 @@ void app_main(void)
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 
     xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 5, NULL);
-    xTaskCreate(publish_task, "publish_task", 2048*8, NULL, 5, &publishTaskHandle);
+    xTaskCreate(publish_task, "publish_task", 2048*8, NULL, 4, &publishTaskHandle);
 
 
     
