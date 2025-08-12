@@ -35,7 +35,7 @@ QueueHandle_t at_resp_queue;
 
 #define MQTT_BROKER      "eu.thingsboard.cloud"
 #define MQTT_PORT        1883
-#define MQTT_CLIENT_ID   "esp32_dev1"
+#define MQTT_CLIENT_ID   "esp32_04003"
 #define MQTT_USERNAME    "dev"
 #define MQTT_PASSWORD    "dev"
 
@@ -395,6 +395,7 @@ bool sim7600_network_init(void) {
         if (json_str) {
             ESP_LOGI("ATTR_REQ", "Requesting shared attributes: %s", json_str);
             result = sim7600_mqtt_publish(MQTT_ATTR_REQUEST, json_str);  // This should return bool
+            ESP_LOGI("ATTR_REQ", "Request sent: %s", result ? "Success" : "Failure");
             free(json_str);
         } else {
             ESP_LOGE("ATTR_REQ", "Failed to serialize JSON");

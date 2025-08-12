@@ -16,7 +16,7 @@ extern "C" {
 
 #define MQTT_BROKER      "eu.thingsboard.cloud"
 #define MQTT_PORT        1883
-#define MQTT_CLIENT_ID   "esp32_dev1"
+#define MQTT_CLIENT_ID   "esp32_04003"
 #define MQTT_USERNAME    "dev"
 #define MQTT_PASSWORD    "dev"
 
