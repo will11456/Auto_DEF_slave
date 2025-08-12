@@ -4,7 +4,6 @@
 #include "main.h"
 #include "modem.h"
 #include "display.h"
-#include "portmacro.h"
 #include "uart.h"
 #include "data.h"
 #include "mqtt.h"
@@ -88,6 +87,8 @@ static const char* extract_gpsinfo_line(const char *resp) {
 
 // Power GNSS on
 bool gnss_power_on(void) {
+    ESP_LOGW(TAG, "power on sending command");
+
     return send_at_command("AT+CGPS=1,1", 5000) != NULL;
 }
 
@@ -125,16 +126,20 @@ void gnss_task(void *param) {
     if (!xSemaphoreTake(publish_mutex, pdMS_TO_TICKS(10000))) {
         ESP_LOGW(TAG, "Timeout waiting for publish mutex");
         esp_restart(); // Restart if mutex not available
-        }
+    }
 
     if (!gnss_power_on()) {
         ESP_LOGE(TAG, "GPS failed to power on");
         vTaskDelete(NULL);
     }
+    
 
     xSemaphoreGive(publish_mutex);
+    
 
-    vTaskDelay(pdMS_TO_TICKS(30000));  // Allow GPS to get first fix
+    
+
+    vTaskDelay(30000 / portTICK_PERIOD_MS);  // Allow GPS to get first fix
 
     
 

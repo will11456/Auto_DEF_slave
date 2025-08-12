@@ -82,16 +82,16 @@ void app_main(void)
 
     // Start Tasks
     xTaskCreatePinnedToCore(run_display_task, "display", 2048*12, NULL, 3, &displayTaskHandle, 0);
-    xTaskCreatePinnedToCore(master_rx_task, "master_rx_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
+    xTaskCreatePinnedToCore(master_rx_task, "master_rx_task", 2048*8, NULL, 1, &uartTaskHandle, 1);
     xTaskCreatePinnedToCore(master_tx_task, "master_tx_task", 2048*8, NULL, 2, &uartTaskHandle, 1);
 
-    xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 1, &dataTaskHandle, 0);
-    xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*12, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(data_task, "data_task", 2048*8, NULL, 4, &dataTaskHandle, 0);
+    xTaskCreatePinnedToCore(modem_task, "modem_task", 2048*12, NULL, 5, NULL, 1);
 
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 
-    xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 5, NULL);
-    xTaskCreate(publish_task, "publish_task", 2048*8, NULL, 4, &publishTaskHandle);
+    xTaskCreatePinnedToCore(gnss_task, "gnss_task", 2048*8, NULL, 7, NULL,0);
+    xTaskCreate(publish_task, "publish_task", 2048*8, NULL, 6, &publishTaskHandle);
 
 
     

@@ -29,24 +29,6 @@ QueueHandle_t at_resp_queue;
 
 // ===== Configuration =====
 
-#define APN              "eapn1.net"
-#define APN_USER         "DynamicF"
-#define APN_PASS         "DynamicF"
-
-#define MQTT_BROKER      "eu.thingsboard.cloud"
-#define MQTT_PORT        1883
-#define MQTT_CLIENT_ID   "esp32_04003"
-#define MQTT_USERNAME    "dev"
-#define MQTT_PASSWORD    "dev"
-
-#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"       //topic for publishing telemetry data
-#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"   //subscribe to attributes
-#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"   //subscribe to RPC requests
-
-#define MQTT_ATTR_REQUEST "v1/devices/me/attributes/request/1"  //topic for requesting attributes on
-#define MQTT_ATTR_RESPONSE "v1/devices/me/attributes/response/+" //topic for responding to attributes
-#define ATTR_REQUEST_ID 1
-
 
 
 // ===== UART & GPIO Setup =====
@@ -90,9 +72,9 @@ void sim7600_init(void) {
         ESP_LOGE(TAG, "Failed to create incoming_queue");
     }
 
-    xTaskCreatePinnedToCore(rx_task, "rx_task", 2048*2, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(tx_task, "tx_task", 2048*2, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(mqtt_urc_task, "mqtt_urc_task", 2048*4, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(rx_task, "rx_task", 2048*4, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(tx_task, "tx_task", 2048*4, NULL, 2, NULL, 1);
+    xTaskCreatePinnedToCore(mqtt_urc_task, "mqtt_urc_task", 2048*4, NULL, 3, NULL, 1);
 
 
 
@@ -134,6 +116,9 @@ const char *send_at_command(const char *command, int timeout_ms) {
     static char response[SIM7600_UART_BUF_SIZE];
     response[0] = '\0';
 
+    if (xSemaphoreTake(at_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return NULL;
+
+    
     // Create a temporary queue for this AT command
     QueueHandle_t temp_resp_queue = xQueueCreate(10, sizeof(char[SIM7600_UART_BUF_SIZE]));
     if (!temp_resp_queue) {
@@ -157,6 +142,7 @@ const char *send_at_command(const char *command, int timeout_ms) {
         ESP_LOGW("AT", "❌ Failed to enqueue command: %s", command);
         vQueueDelete(temp_resp_queue);
         at_handler_set_response_queue(NULL);
+        xSemaphoreGive(at_mutex);
         return NULL;
     }
 
@@ -179,7 +165,7 @@ const char *send_at_command(const char *command, int timeout_ms) {
             }
         }
     }
-
+    xSemaphoreGive(at_mutex);
     if (!got_any_line) {
         ESP_LOGW("AT", "❌ No response (timeout %d ms): %s", timeout_ms, command);
     }

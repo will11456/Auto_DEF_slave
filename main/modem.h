@@ -16,11 +16,17 @@ extern "C" {
 
 #define MQTT_BROKER      "eu.thingsboard.cloud"
 #define MQTT_PORT        1883
-#define MQTT_CLIENT_ID   "esp32_04003"
+#define MQTT_CLIENT_ID   "esp32_04004"
 #define MQTT_USERNAME    "dev"
 #define MQTT_PASSWORD    "dev"
 
-#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"
+#define MQTT_TOPIC_PUB   "v1/devices/me/telemetry"       //topic for publishing telemetry data
+#define MQTT_ATRR_SUBSCRIBE "v1/devices/me/attributes"   //subscribe to attributes
+#define MQTT_RPC_REQUEST "v1/devices/me/rpc/request/+"   //subscribe to RPC requests
+
+#define MQTT_ATTR_REQUEST "v1/devices/me/attributes/request/1"  //topic for requesting attributes on
+#define MQTT_ATTR_RESPONSE "v1/devices/me/attributes/response/+" //topic for responding to attributes
+#define ATTR_REQUEST_ID 1
 
 #define SIM7600_UART_PORT UART_NUM_2
 #define SIM7600_UART_BUF_SIZE 1024 //4096
