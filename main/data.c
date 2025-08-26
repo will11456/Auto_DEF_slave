@@ -612,6 +612,21 @@ void handle_status_message(const DecodedMessage *decoded_msg){
 
             break;
 
+        case AUTO_ROUTINE_VERIFYING:
+            if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
+            {
+                lv_obj_set_style_text_color(ui_ErrorTextArea, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+                lv_obj_set_style_border_color(ui_ErrorPanel, lv_color_hex(0x003F5A), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+                lv_textarea_set_text(ui_ErrorTextArea, "Verifying");
+                lvgl_unlock();
+            }
+            xSemaphoreTake(data_mutex, portMAX_DELAY);
+            strcpy(shared_sensor_data.status, "Auto: Verifying");
+            xSemaphoreGive(data_mutex);
+            publish_data();
+            break;
+
         case PUMP_ERROR:
             if (lvgl_lock(LVGL_LOCK_WAIT_TIME))
             {
